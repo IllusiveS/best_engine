@@ -1,6 +1,15 @@
 #include <iostream>
 
+#include <renderer/vk_engine.h>
+
 int main() {
-	std::cout << "Hello, World!" << std::endl;
+	VulkanEngine engine;
+
+	engine.init();
+
+	engine.run();
+
+	engine.cleanup();
+
 	return 0;
 }

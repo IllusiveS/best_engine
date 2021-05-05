@@ -3,8 +3,10 @@ project(best_engine)
 
 set(CMAKE_CXX_STANDARD 20)
 
+set(CMAKE_BINARY_DIR "../bin")
+set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR})
 
-add_executable(best_engine main.cpp)
+add_executable(best_engine main.cpp src/renderer/vk_engine.cpp src/renderer/vk_engine.h src/renderer/vk_init.cpp src/renderer/vk_init.h src/renderer/vk_types.cpp src/renderer/vk_types.h third_party/vk-bootstrap/src/VkBootstrap.cpp)
 
 target_compile_definitions(best_engine PRIVATE TRACY_ENABLE)
 
@@ -23,7 +25,7 @@ endif ()
 
 string(STRIP "${SDL2_LIBRARIES}" SDL2_LIBRARIES)
 
-
+include_directories(src/)
 include_directories(third_party/vk-bootstrap/src)
 include_directories(third_party/taskflow/taskflow)
 include_directories(third_party/tracy/)
@@ -33,7 +35,6 @@ include_directories(third_party/wren/)
 include_directories(third_party/VulkanMemoryAllocator/include)
 
 include_directories(${SDL2_INCLUDE_DIR})
-
 
 IF (WIN32)
     target_compile_definitions(best_engine PRIVATE VK_USE_PLATFORM_WIN32_KHR)
