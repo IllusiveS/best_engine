@@ -122,6 +122,8 @@ public:
 	VkPipeline _meshPipeline;
 	Mesh _triangleMesh;
 
+	Mesh _monkeyMesh;
+
 	int _selectedShader{ 0 };
 
 private:

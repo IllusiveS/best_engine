@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 
-add_executable(best_engine main.cpp src/renderer/vk_engine.cpp src/renderer/vk_engine.h src/renderer/vk_init.cpp src/renderer/vk_init.h src/renderer/vk_types.cpp src/renderer/vk_types.h third_party/vk-bootstrap/src/VkBootstrap.cpp src/renderer/vk_mesh.cpp src/renderer/vk_mesh.h)
+add_executable(best_engine main.cpp third_party/tinyobjloader/tiny_obj_loader.cc src/renderer/vk_engine.cpp src/renderer/vk_engine.h src/renderer/vk_init.cpp src/renderer/vk_init.h src/renderer/vk_types.cpp src/renderer/vk_types.h third_party/vk-bootstrap/src/VkBootstrap.cpp src/renderer/vk_mesh.cpp src/renderer/vk_mesh.h)
 
 target_compile_definitions(best_engine PRIVATE TRACY_ENABLE)
 
@@ -32,6 +32,7 @@ include_directories(third_party/glm)
 include_directories(third_party/entt/single_include/entt)
 include_directories(third_party/wren/)
 include_directories(third_party/VulkanMemoryAllocator/include)
+include_directories(third_party/tinyobjloader)
 
 include_directories(${SDL2_INCLUDE_DIR})
 
