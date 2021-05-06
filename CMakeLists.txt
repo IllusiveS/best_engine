@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 
-add_executable(best_engine main.cpp src/renderer/vk_engine.cpp src/renderer/vk_engine.h src/renderer/vk_init.cpp src/renderer/vk_init.h src/renderer/vk_types.cpp src/renderer/vk_types.h third_party/vk-bootstrap/src/VkBootstrap.cpp)
+add_executable(best_engine main.cpp src/renderer/vk_engine.cpp src/renderer/vk_engine.h src/renderer/vk_init.cpp src/renderer/vk_init.h src/renderer/vk_types.cpp src/renderer/vk_types.h third_party/vk-bootstrap/src/VkBootstrap.cpp src/renderer/vk_mesh.cpp src/renderer/vk_mesh.h)
 
 target_compile_definitions(best_engine PRIVATE TRACY_ENABLE)
 

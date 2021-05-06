@@ -6,9 +6,19 @@
 #define BEST_ENGINE_VK_ENGINE_H
 
 #include "vk_types.h"
+
 #include <vector>
 #include <functional>
 #include <deque>
+#include "vk_mesh.h"
+
+#include <glm/glm.hpp>
+#include <glm/gtx/transform.hpp>
+
+struct MeshPushConstants {
+	glm::vec4 data;
+	glm::mat4 render_matrix;
+};
 
 struct DeletionQueue
 {
@@ -100,11 +110,17 @@ public:
 	VkFence _renderFence;
 
 	VkPipelineLayout _trianglePipelineLayout;
+	VkPipelineLayout _meshPipelineLayout;
 
 	VkPipeline _trianglePipeline;
 	VkPipeline _redTrianglePipeline;
 
 	DeletionQueue _mainDeletionQueue;
+
+	VmaAllocator _allocator; //vma lib allocator
+
+	VkPipeline _meshPipeline;
+	Mesh _triangleMesh;
 
 	int _selectedShader{ 0 };
 
@@ -116,6 +132,10 @@ private:
 	void init_framebuffers();
 	void init_sync_structures();
 	void init_pipelines();
+
+	void load_meshes();
+
+	void upload_mesh(Mesh& mesh);
 };
 
 
