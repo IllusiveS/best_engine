@@ -3,8 +3,7 @@ project(best_engine)
 
 set(CMAKE_CXX_STANDARD 20)
 
-set(CMAKE_BINARY_DIR "../bin")
-set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR})
+set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 
 add_executable(best_engine main.cpp src/renderer/vk_engine.cpp src/renderer/vk_engine.h src/renderer/vk_init.cpp src/renderer/vk_init.h src/renderer/vk_types.cpp src/renderer/vk_types.h third_party/vk-bootstrap/src/VkBootstrap.cpp)
 
@@ -47,3 +46,28 @@ target_include_directories(best_engine PRIVATE ${SDL2_INCLUDE_DIR})
 
 target_link_libraries(best_engine Vulkan::Vulkan)
 target_link_libraries(best_engine ${SDL2_LIBRARIES})
+
+find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)
+
+file(GLOB_RECURSE GLSL_SOURCE_FILES
+        "${PROJECT_SOURCE_DIR}/shaders/*.frag"
+        "${PROJECT_SOURCE_DIR}/shaders/*.vert"
+        "${PROJECT_SOURCE_DIR}/shaders/*.comp"
+        )
+
+foreach(GLSL ${GLSL_SOURCE_FILES})
+    message(STATUS "BUILDING SHADER")
+    get_filename_component(FILE_NAME ${GLSL} NAME)
+    set(SPIRV "${PROJECT_SOURCE_DIR}/shaders/${FILE_NAME}.spv")
+    message(STATUS ${GLSL})
+    add_custom_command(
+            OUTPUT ${SPIRV}
+            COMMAND ${GLSL_VALIDATOR} -V ${GLSL} -o ${SPIRV}
+            DEPENDS ${GLSL})
+    list(APPEND SPIRV_BINARY_FILES ${SPIRV})
+endforeach(GLSL)
+
+add_custom_target(
+        Shaders
+        DEPENDS ${SPIRV_BINARY_FILES}
+)
