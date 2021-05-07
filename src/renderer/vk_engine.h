@@ -50,6 +50,7 @@ public:
 	VkPipelineColorBlendAttachmentState _colorBlendAttachment;
 	VkPipelineMultisampleStateCreateInfo _multisampling;
 	VkPipelineLayout _pipelineLayout;
+	VkPipelineDepthStencilStateCreateInfo _depthStencil;
 
 	VkPipeline build_pipeline(VkDevice device, VkRenderPass pass);
 };
@@ -123,6 +124,12 @@ public:
 	Mesh _triangleMesh;
 
 	Mesh _monkeyMesh;
+
+	VkImageView _depthImageView;
+	AllocatedImage _depthImage;
+
+	//the format for the depth image
+	VkFormat _depthFormat;
 
 	int _selectedShader{ 0 };
 

@@ -14,5 +14,11 @@ struct AllocatedBuffer {
 	VmaAllocation _allocation;
 };
 
+struct AllocatedImage {
+    VkImage _image;
+    VmaAllocation _allocation;
+};
+
+
 
 #endif //BEST_ENGINE_VK_TYPES_H
