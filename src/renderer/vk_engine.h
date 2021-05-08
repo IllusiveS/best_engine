@@ -17,6 +17,17 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
 
+constexpr unsigned int FRAME_OVERLAP = 2;
+
+struct FrameData {
+	VkSemaphore _presentSemaphore, _renderSemaphore;
+	VkFence _renderFence;
+
+	VkCommandPool _commandPool;
+	VkCommandBuffer _mainCommandBuffer;
+};
+
+
 struct Material {
 	VkPipeline pipeline;
 	VkPipelineLayout pipelineLayout;
@@ -115,15 +126,16 @@ public:
 	VkQueue _graphicsQueue; //queue we will submit to
 	uint32_t _graphicsQueueFamily; //family of that queue
 
-	VkCommandPool _commandPool; //the command pool for our commands
-	VkCommandBuffer _mainCommandBuffer; //the buffer we will record into
-
 	VkRenderPass _renderPass;
 
 	std::vector<VkFramebuffer> _framebuffers;
 
-	VkSemaphore _presentSemaphore, _renderSemaphore;
-	VkFence _renderFence;
+	//other code ....
+	//frame storage
+	FrameData _frames[FRAME_OVERLAP];
+
+	//getter for the frame we are rendering to right now.
+	FrameData& get_current_frame();
 
 	VkPipelineLayout _trianglePipelineLayout;
 	VkPipelineLayout _meshPipelineLayout;
