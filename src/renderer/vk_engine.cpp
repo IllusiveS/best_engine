@@ -566,6 +566,7 @@ void VulkanEngine::init_pipelines(){
 	vkDestroyShaderModule(_device, redTriangleFragShader, nullptr);
 	vkDestroyShaderModule(_device, triangleFragShader, nullptr);
 	vkDestroyShaderModule(_device, triangleVertexShader, nullptr);
+	vkDestroyShaderModule(_device, colorMeshShader, nullptr);
 
 	//adding the pipelines to the deletion queue
 	_mainDeletionQueue.push_function([=]() {
@@ -641,8 +642,7 @@ void VulkanEngine::cleanup()
 {
 	if (_isInitialized) {
 
-		//make sure the GPU has stopped doing its things
-		vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000);
+		vkDeviceWaitIdle(_device);
 
 		_mainDeletionQueue.flush();
 		vmaDestroyAllocator(_allocator);
@@ -817,18 +817,8 @@ void VulkanEngine::run()
 		while (SDL_PollEvent(&e) != 0)
 		{
 			//close the window when user clicks the X button or alt-f4s
-			if (e.type == SDL_QUIT) bQuit = true;
-
-			else if (e.type == SDL_KEYDOWN)
-			{
-				if (e.key.keysym.sym == SDLK_SPACE)
-				{
-					_selectedShader += 1;
-					if(_selectedShader > 1)
-					{
-						_selectedShader = 0;
-					}
-				}
+			if (e.type == SDL_QUIT) {
+				bQuit = true;
 			}
 		}
 
@@ -1082,26 +1072,23 @@ void VulkanEngine::init_descriptors()
 
 	_sceneParameterBuffer = create_buffer(sceneParamBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
+
 	for (int i = 0; i < FRAME_OVERLAP; i++)
 	{
+		_frames[i].cameraBuffer = create_buffer(sizeof(GPUCameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
 		const int MAX_OBJECTS = 10000;
 		_frames[i].objectBuffer = create_buffer(sizeof(GPUObjectData) * MAX_OBJECTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-		_frames[i].cameraBuffer = create_buffer(sizeof(GPUCameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-		//TODO free buffers
-
-		//allocate one descriptor set for each frame
-		VkDescriptorSetAllocateInfo allocInfo ={};
+		VkDescriptorSetAllocateInfo allocInfo = {};
 		allocInfo.pNext = nullptr;
 		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		//using the pool we just set
 		allocInfo.descriptorPool = _descriptorPool;
-		//only 1 descriptor
 		allocInfo.descriptorSetCount = 1;
-		//using the global data layout
 		allocInfo.pSetLayouts = &_globalSetLayout;
 
-		//allocate the descriptor set that will point to object buffer
+		vkAllocateDescriptorSets(_device, &allocInfo, &_frames[i].globalDescriptor);
+
 		VkDescriptorSetAllocateInfo objectSetAlloc = {};
 		objectSetAlloc.pNext = nullptr;
 		objectSetAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1137,6 +1124,22 @@ void VulkanEngine::init_descriptors()
 
 		vkUpdateDescriptorSets(_device, 3, setWrites, 0, nullptr);
 	}
+
+	_mainDeletionQueue.push_function([&]() {
+
+		vmaDestroyBuffer(_allocator, _sceneParameterBuffer._buffer, _sceneParameterBuffer._allocation);
+		vkDestroyDescriptorSetLayout(_device, _objectSetLayout, nullptr);
+		vkDestroyDescriptorSetLayout(_device, _globalSetLayout, nullptr);
+
+		vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
+
+		for (int i = 0; i < FRAME_OVERLAP; i++)
+		{
+			vmaDestroyBuffer(_allocator,_frames[i].cameraBuffer._buffer, _frames[i].cameraBuffer._allocation);
+
+			vmaDestroyBuffer(_allocator, _frames[i].objectBuffer._buffer, _frames[i].objectBuffer._allocation);
+		}
+	});
 }
 
 size_t VulkanEngine::pad_uniform_buffer_size(size_t originalSize)
