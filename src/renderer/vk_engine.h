@@ -19,12 +19,37 @@
 
 constexpr unsigned int FRAME_OVERLAP = 2;
 
+struct GPUObjectData{
+	glm::mat4 modelMatrix;
+};
+
+struct GPUSceneData {
+	glm::vec4 fogColor; // w is for exponent
+	glm::vec4 fogDistances; //x for min, y for max, zw unused.
+	glm::vec4 ambientColor;
+	glm::vec4 sunlightDirection; //w for sun power
+	glm::vec4 sunlightColor;
+};
+
+struct GPUCameraData{
+	glm::mat4 view;
+	glm::mat4 projection;
+	glm::mat4 viewproj;
+};
+
 struct FrameData {
 	VkSemaphore _presentSemaphore, _renderSemaphore;
 	VkFence _renderFence;
 
 	VkCommandPool _commandPool;
 	VkCommandBuffer _mainCommandBuffer;
+
+	AllocatedBuffer objectBuffer;
+	VkDescriptorSet objectDescriptor;
+
+	AllocatedBuffer cameraBuffer;
+
+	VkDescriptorSet globalDescriptor;
 };
 
 
@@ -164,6 +189,17 @@ public:
 	std::unordered_map<std::string,Material> _materials;
 	std::unordered_map<std::string,Mesh> _meshes;
 
+	VkDescriptorSetLayout _globalSetLayout;
+	VkDescriptorSetLayout _objectSetLayout;
+
+	VkDescriptorPool _descriptorPool;
+
+	VkPhysicalDeviceProperties _gpuProperties;
+
+	GPUSceneData _sceneParameters;
+	AllocatedBuffer _sceneParameterBuffer;
+
+
 	//functions
 	//create material and add it to the map
 	Material* create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string& name);
@@ -176,6 +212,10 @@ public:
 
 	//our draw function
 	void draw_objects(VkCommandBuffer cmd,RenderObject* first, int count);
+
+	AllocatedBuffer create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
+
+	void init_descriptors();
 
 	int _selectedShader{ 0 };
 
@@ -192,6 +232,8 @@ private:
 	void init_scene();
 
 	void upload_mesh(Mesh& mesh);
+
+	size_t pad_uniform_buffer_size(size_t originalSize);
 };
 
 
