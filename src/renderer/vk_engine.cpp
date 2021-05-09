@@ -16,6 +16,9 @@
 
 #include <iostream>
 #include <fstream>
+#include <entt.hpp>
+#include <components/Camera.h>
+#include <components/Transform.h>
 
 
 //we want to immediately abort when there is an error. In normal engines this would give an error message to the user, or perform a dump of state.
@@ -657,7 +660,7 @@ void VulkanEngine::cleanup()
 	}
 }
 
-void VulkanEngine::draw()
+void VulkanEngine::draw(entt::registry& reg)
 {
 	//wait until the GPU has finished rendering the last frame. Timeout of 1 second
 	VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
@@ -702,7 +705,7 @@ void VulkanEngine::draw()
 
 	vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-	draw_objects(cmd, _renderables.data(), _renderables.size());
+	draw_objects(cmd, _renderables.data(), _renderables.size(), reg);
 
 	//finalize the render pass
 	vkCmdEndRenderPass(cmd);
@@ -805,7 +808,7 @@ bool VulkanEngine::load_shader_module(const char* filePath, VkShaderModule* outS
 }
 
 
-void VulkanEngine::run()
+void VulkanEngine::run(entt::registry& reg)
 {
 	SDL_Event e;
 	bool bQuit = false;
@@ -822,7 +825,7 @@ void VulkanEngine::run()
 			}
 		}
 
-		draw();
+		draw(reg);
 	}
 }
 
@@ -860,7 +863,7 @@ Mesh* VulkanEngine::get_mesh(const std::string& name)
 }
 
 
-void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int count)
+void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int count, entt::registry& reg)
 {
 	void* objectData;
 	vmaMapMemory(_allocator, get_current_frame().objectBuffer._allocation, &objectData);
@@ -875,9 +878,16 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 
 	vmaUnmapMemory(_allocator, get_current_frame().objectBuffer._allocation);
 
+	glm::vec3 camPos = {};
+	auto camera_view = reg.view<const Camera, const Transform>();
+	camera_view.each([&](const auto &cam, const auto &transform) {
+		const glm::mat4 inverted = glm::inverse(transform.transform);
+		const glm::vec3 forward = normalize(glm::vec3(inverted[3]));
+		camPos = forward;
+	});
 
 	//camera view
-	glm::vec3 camPos = { 0.f,-6.f,-10.f };
+	//glm::vec3 camPos = { 0.f,-6.f,-10.f };
 
 	glm::mat4 view = glm::translate(glm::mat4(1.f), camPos);
 	//camera projection

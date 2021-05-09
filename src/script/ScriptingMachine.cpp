@@ -11,6 +11,11 @@ void ScriptingMachine::init() {
 	vm = wrenNewVM(&config);
 }
 
+void ScriptingMachine::execute_script(Script script)
+{
+	WrenInterpretResult result = wrenInterpret(vm, "main", script.script.c_str());
+}
+
 void ScriptingMachine::writeFn(WrenVM* vm, const char* text)
 {
 	printf("%s", text);

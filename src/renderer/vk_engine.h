@@ -16,6 +16,7 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
+#include <entt.hpp>
 
 constexpr unsigned int FRAME_OVERLAP = 2;
 
@@ -124,10 +125,10 @@ public:
 	void cleanup();
 
 	//draw loop
-	void draw();
+	void draw(entt::registry& reg);
 
 	//run main loop
-	void run();
+	void run(entt::registry& reg);
 
 	bool load_shader_module(const char* filePath, VkShaderModule* outShaderModule);
 
@@ -211,7 +212,7 @@ public:
 	Mesh* get_mesh(const std::string& name);
 
 	//our draw function
-	void draw_objects(VkCommandBuffer cmd,RenderObject* first, int count);
+	void draw_objects(VkCommandBuffer cmd,RenderObject* first, int count, entt::registry& reg);
 
 	AllocatedBuffer create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
 

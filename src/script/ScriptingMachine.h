@@ -7,7 +7,7 @@
 
 #include <wren.hpp>
 #include <iostream>
-
+#include "Script.h"
 
 
 class ScriptingMachine {
@@ -17,6 +17,7 @@ class ScriptingMachine {
 public:
 	void init();
 
+	void execute_script(Script script);
 private:
 	static void writeFn(WrenVM* vm, const char* text);
 
