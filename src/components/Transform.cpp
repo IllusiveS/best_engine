@@ -5,7 +5,7 @@
 #include "Transform.h"
 
 void Vector3::bind_methods(wrenpp::VM& vm) {
-	vm.beginModule("math")
+	vm.beginModule("assets/scripts/core/math")
 		.bindClass<Vector3, float, float, float>("Vector3")
 			.bindGetter< decltype(Vector3::x), &Vector3::x >( "x" )
 			.bindSetter< decltype(Vector3::x), &Vector3::x >( "x=(_)" )

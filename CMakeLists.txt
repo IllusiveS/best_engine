@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 
-add_executable(best_engine main.cpp third_party/tinyobjloader/tiny_obj_loader.cc src/renderer/vk_engine.cpp src/renderer/vk_engine.h src/renderer/vk_init.cpp src/renderer/vk_init.h src/renderer/vk_types.cpp src/renderer/vk_types.h third_party/vk-bootstrap/src/VkBootstrap.cpp src/renderer/vk_mesh.cpp src/renderer/vk_mesh.h src/script/ScriptingMachine.cpp src/script/ScriptingMachine.h src/script/Script.cpp src/script/Script.h src/components/Camera.cpp src/components/Camera.h src/components/Transform.cpp src/components/Transform.h)
+add_executable(best_engine main.cpp third_party/tinyobjloader/tiny_obj_loader.cc src/renderer/vk_engine.cpp src/renderer/vk_engine.h src/renderer/vk_init.cpp src/renderer/vk_init.h src/renderer/vk_types.cpp src/renderer/vk_types.h third_party/vk-bootstrap/src/VkBootstrap.cpp src/renderer/vk_mesh.cpp src/renderer/vk_mesh.h src/script/ScriptingMachine.cpp src/script/ScriptingMachine.h src/script/Script.cpp src/script/Script.h src/components/Camera.cpp src/components/Camera.h src/components/Transform.cpp src/components/Transform.h src/components/MeshComponent.cpp src/components/MeshComponent.h)
 
 target_compile_definitions(best_engine PRIVATE TRACY_ENABLE)
 
@@ -48,9 +48,9 @@ ENDIF()
 target_include_directories(best_engine PRIVATE Vulkan::Vulkan)
 target_include_directories(best_engine PRIVATE ${SDL2_INCLUDE_DIR})
 
+target_link_libraries(best_engine wren)
 target_link_libraries(best_engine Vulkan::Vulkan)
 target_link_libraries(best_engine ${SDL2_LIBRARIES})
-target_link_libraries(best_engine wren)
 
 find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)
 
@@ -61,10 +61,10 @@ file(GLOB_RECURSE GLSL_SOURCE_FILES
         )
 
 foreach(GLSL ${GLSL_SOURCE_FILES})
-    message(STATUS "BUILDING SHADER")
+    #message(STATUS "BUILDING SHADER")
     get_filename_component(FILE_NAME ${GLSL} NAME)
     set(SPIRV "${PROJECT_SOURCE_DIR}/shaders/${FILE_NAME}.spv")
-    message(STATUS ${GLSL})
+    #message(STATUS ${GLSL})
     add_custom_command(
             OUTPUT ${SPIRV}
             COMMAND ${GLSL_VALIDATOR} -V ${GLSL} -o ${SPIRV}

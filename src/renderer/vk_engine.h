@@ -119,7 +119,7 @@ public:
 	struct SDL_Window* _window{ nullptr };
 
 	//initializes everything in the engine
-	void init();
+	void init(entt::registry& reg);
 
 	//shuts down the engine
 	void cleanup();
@@ -230,7 +230,7 @@ private:
 	void init_pipelines();
 
 	void load_meshes();
-	void init_scene();
+	void init_scene(entt::registry& reg);
 
 	void upload_mesh(Mesh& mesh);
 

@@ -19,6 +19,7 @@
 #include <entt.hpp>
 #include <components/Camera.h>
 #include <components/Transform.h>
+#include <components/MeshComponent.h>
 
 
 //we want to immediately abort when there is an error. In normal engines this would give an error message to the user, or perform a dump of state.
@@ -91,7 +92,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass) {
 }
 
 
-void VulkanEngine::init()
+void VulkanEngine::init(entt::registry& reg)
 {
 	// We initialize SDL and create a window with it.
 	SDL_Init(SDL_INIT_VIDEO);
@@ -128,7 +129,7 @@ void VulkanEngine::init()
 
 	load_meshes();
 
-	init_scene();
+	init_scene(reg);
 
 	//everything went fine
 	_isInitialized = true;
@@ -597,7 +598,7 @@ void VulkanEngine::load_meshes()
 	_triangleMesh._vertices[1].color = { 0.f, 1.f, 0.0f }; //pure green
 	_triangleMesh._vertices[2].color = { 0.f, 1.f, 0.0f }; //pure green
 
-	_monkeyMesh.load_from_obj("../assets/monkey_flat.obj");
+	_monkeyMesh.load_from_obj("assets/monkey_flat.obj");
 
 	upload_mesh(_triangleMesh);
 	upload_mesh(_monkeyMesh);
@@ -886,6 +887,8 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 		camPos = forward;
 	});
 
+
+
 	//camera view
 	//glm::vec3 camPos = { 0.f,-6.f,-10.f };
 
@@ -923,67 +926,66 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 
 	vmaUnmapMemory(_allocator, _sceneParameterBuffer._allocation);
 
-	Mesh* lastMesh = nullptr;
-	Material* lastMaterial = nullptr;
-	for (int i = 0; i < count; i++)
-	{
-		RenderObject& object = first[i];
 
+
+	auto renderables_view = reg.view<const MeshComponent, const Transform>();
+	renderables_view.each([&](const auto &mesh, const auto &transform) {
 		//only bind the pipeline if it doesn't match with the already bound one
-		if (object.material != lastMaterial) {
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh._material->pipeline);
 
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, object.material->pipeline);
-			lastMaterial = object.material;
+		//camera data descriptor
+		uint32_t uniform_offset = pad_uniform_buffer_size(sizeof(GPUSceneData)) * frameIndex;
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh._material->pipelineLayout, 0, 1, &get_current_frame().globalDescriptor, 1, &uniform_offset);
 
-			//camera data descriptor
-			uint32_t uniform_offset = pad_uniform_buffer_size(sizeof(GPUSceneData)) * frameIndex;
-			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, object.material->pipelineLayout, 0, 1, &get_current_frame().globalDescriptor, 1, &uniform_offset);
-
-			//object data descriptor
-			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, object.material->pipelineLayout, 1, 1, &get_current_frame().objectDescriptor, 0, nullptr);
-		}
+		//object data descriptor
+		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh._material->pipelineLayout, 1, 1, &get_current_frame().objectDescriptor, 0, nullptr);
 
 
-		glm::mat4 model = object.transformMatrix;
+		glm::mat4 model = transform.transform;
 		//final render matrix, that we are calculating on the cpu
 		glm::mat4 mesh_matrix = projection * view * model;
 
 		MeshPushConstants constants = {};
-		constants.render_matrix = object.transformMatrix;
+		constants.render_matrix = transform.transform;
 
 		//upload the mesh to the GPU via pushconstants
-		vkCmdPushConstants(cmd, object.material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
+		vkCmdPushConstants(cmd, mesh._material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
 
-		//only bind the mesh if it's a different one from last bind
-		if (object.mesh != lastMesh) {
-			//bind the mesh vertex buffer with offset 0
-			VkDeviceSize offset = 0;
-			vkCmdBindVertexBuffers(cmd, 0, 1, &object.mesh->_vertexBuffer._buffer, &offset);
-			lastMesh = object.mesh;
-		}
+		//bind the mesh vertex buffer with offset 0
+		VkDeviceSize offset = 0;
+		vkCmdBindVertexBuffers(cmd, 0, 1, &mesh._mesh->_vertexBuffer._buffer, &offset);
+
 		//we can now draw
-		vkCmdDraw(cmd, object.mesh->_vertices.size(), 1,0, i);
-	}
+		vkCmdDraw(cmd, mesh._mesh->_vertices.size(), 1, 0, 0);
+	});
+
 }
 
-void VulkanEngine::init_scene()
+void VulkanEngine::init_scene(entt::registry& reg)
 {
 	RenderObject monkey = {};
 	monkey.mesh = get_mesh("monkey");
 	monkey.material = get_material("defaultmesh");
 	monkey.transformMatrix = glm::mat4{ 1.0f };
 
+	auto monkey_ent = reg.create();
+	reg.emplace<MeshComponent>(monkey_ent, monkey.mesh, monkey.material);
+	reg.emplace<Transform>(monkey_ent, glm::mat4{ 1.0f });
+
 	_renderables.push_back(monkey);
 
 	for (int x = -20; x <= 20; x++) {
 		for (int y = -20; y <= 20; y++) {
-
 			RenderObject tri = {};
 			tri.mesh = get_mesh("triangle");
 			tri.material = get_material("defaultmesh");
 			glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(x, 0, y));
 			glm::mat4 scale = glm::scale(glm::mat4{ 1.0 }, glm::vec3(0.2, 0.2, 0.2));
 			tri.transformMatrix = translation * scale;
+
+			auto ent = reg.create();
+			reg.emplace<MeshComponent>(ent, monkey.mesh, monkey.material);
+			reg.emplace<Transform>(ent, translation * scale);
 
 			_renderables.push_back(tri);
 		}
