@@ -36,6 +36,7 @@ include_directories(third_party/entt/single_include/entt)
 include_directories(third_party/wren/src/include)
 include_directories(third_party/VulkanMemoryAllocator/include)
 include_directories(third_party/tinyobjloader)
+include_directories(third_party/flecs/include/flecs)
 
 include_directories(${SDL2_INCLUDE_DIR})
 
@@ -50,6 +51,7 @@ target_include_directories(best_engine PRIVATE ${SDL2_INCLUDE_DIR})
 
 target_link_libraries(best_engine wren)
 target_link_libraries(best_engine Vulkan::Vulkan)
+target_link_libraries(best_engine flecs)
 target_link_libraries(best_engine ${SDL2_LIBRARIES})
 
 find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)

@@ -18,6 +18,8 @@
 #include <glm/gtx/transform.hpp>
 #include <entt.hpp>
 
+#include <flecs.h>
+
 constexpr unsigned int FRAME_OVERLAP = 2;
 
 struct GPUObjectData{
@@ -63,8 +65,6 @@ struct RenderObject {
 	Mesh* mesh;
 
 	Material* material;
-
-	glm::mat4 transformMatrix;
 };
 
 struct MeshPushConstants {
@@ -119,16 +119,16 @@ public:
 	struct SDL_Window* _window{ nullptr };
 
 	//initializes everything in the engine
-	void init(entt::registry& reg);
+	void init(flecs::world &world);
 
 	//shuts down the engine
 	void cleanup();
 
 	//draw loop
-	void draw(entt::registry& reg);
+	void draw(flecs::world& world);
 
 	//run main loop
-	void run(entt::registry& reg);
+	void run(flecs::world& world);
 
 	bool load_shader_module(const char* filePath, VkShaderModule* outShaderModule);
 
@@ -212,7 +212,7 @@ public:
 	Mesh* get_mesh(const std::string& name);
 
 	//our draw function
-	void draw_objects(VkCommandBuffer cmd,RenderObject* first, int count, entt::registry& reg);
+	void draw_objects(VkCommandBuffer cmd,RenderObject* first, int count, flecs::world& world);
 
 	AllocatedBuffer create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
 
@@ -230,7 +230,7 @@ private:
 	void init_pipelines();
 
 	void load_meshes();
-	void init_scene(entt::registry& reg);
+	void init_scene(flecs::world& world);
 
 	void upload_mesh(Mesh& mesh);
 

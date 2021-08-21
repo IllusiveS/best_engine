@@ -11,9 +11,6 @@
 
 struct MeshComponent {
 public:
-	explicit MeshComponent(Mesh* mesh, Material* mat)
-		: _mesh(mesh), _material(mat) {}
-
 	Mesh* _mesh;
 	Material* _material;
 };

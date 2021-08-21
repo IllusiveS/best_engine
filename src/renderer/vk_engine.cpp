@@ -22,6 +22,7 @@
 #include <components/MeshComponent.h>
 
 
+
 //we want to immediately abort when there is an error. In normal engines this would give an error message to the user, or perform a dump of state.
 
 #define VK_CHECK(x)                                                 \
@@ -92,7 +93,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass) {
 }
 
 
-void VulkanEngine::init(entt::registry& reg)
+void VulkanEngine::init(flecs::world &world)
 {
 	// We initialize SDL and create a window with it.
 	SDL_Init(SDL_INIT_VIDEO);
@@ -129,7 +130,7 @@ void VulkanEngine::init(entt::registry& reg)
 
 	load_meshes();
 
-	init_scene(reg);
+	init_scene(world);
 
 	//everything went fine
 	_isInitialized = true;
@@ -661,7 +662,7 @@ void VulkanEngine::cleanup()
 	}
 }
 
-void VulkanEngine::draw(entt::registry& reg)
+void VulkanEngine::draw(flecs::world& world)
 {
 	//wait until the GPU has finished rendering the last frame. Timeout of 1 second
 	VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
@@ -706,7 +707,7 @@ void VulkanEngine::draw(entt::registry& reg)
 
 	vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-	draw_objects(cmd, _renderables.data(), _renderables.size(), reg);
+	draw_objects(cmd, _renderables.data(), _renderables.size(), world);
 
 	//finalize the render pass
 	vkCmdEndRenderPass(cmd);
@@ -809,7 +810,7 @@ bool VulkanEngine::load_shader_module(const char* filePath, VkShaderModule* outS
 }
 
 
-void VulkanEngine::run(entt::registry& reg)
+void VulkanEngine::run(flecs::world& world)
 {
 	SDL_Event e;
 	bool bQuit = false;
@@ -826,7 +827,7 @@ void VulkanEngine::run(entt::registry& reg)
 			}
 		}
 
-		draw(reg);
+		draw(world);
 	}
 }
 
@@ -864,7 +865,7 @@ Mesh* VulkanEngine::get_mesh(const std::string& name)
 }
 
 
-void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int count, entt::registry& reg)
+void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int count, flecs::world& world)
 {
 	void* objectData;
 	vmaMapMemory(_allocator, get_current_frame().objectBuffer._allocation, &objectData);
@@ -874,24 +875,23 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 	for (int i = 0; i < count; i++)
 	{
 		RenderObject& object = first[i];
-		objectSSBO[i].modelMatrix = object.transformMatrix;
+		//objectSSBO[i].modelMatrix = object.transformMatrix;
 	}
 
 	vmaUnmapMemory(_allocator, get_current_frame().objectBuffer._allocation);
 
 	glm::vec3 camPos = {};
-	auto camera_view = reg.view<const Camera, const Transform>();
-	camera_view.each([&](const auto &cam, const auto &transform) {
+
+	static auto q = world.query<const Camera, const Transform>();
+
+	q.each([&](const Camera& cam, const Transform& transform) {
 		const glm::mat4 inverted = glm::inverse(transform.transform);
 		const glm::vec3 forward = normalize(glm::vec3(inverted[3]));
 		camPos = forward;
 	});
 
-
-
 	//camera view
-	//glm::vec3 camPos = { 0.f,-6.f,-10.f };
-
+	camPos = { 0.f,-6.f,-10.f };
 	glm::mat4 view = glm::translate(glm::mat4(1.f), camPos);
 	//camera projection
 	glm::mat4 projection = glm::perspective(glm::radians(70.f), 1700.f / 900.f, 0.1f, 200.0f);
@@ -926,10 +926,11 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 
 	vmaUnmapMemory(_allocator, _sceneParameterBuffer._allocation);
 
+	static auto renderables_query = world.query<const MeshComponent, const Transform>();
 
+	renderables_query.each([&](flecs::entity e, const MeshComponent &mesh, const Transform &transform){
+		//std::cout << e.name() << std::endl;
 
-	auto renderables_view = reg.view<const MeshComponent, const Transform>();
-	renderables_view.each([&](const auto &mesh, const auto &transform) {
 		//only bind the pipeline if it doesn't match with the already bound one
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh._material->pipeline);
 
@@ -961,18 +962,17 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 
 }
 
-void VulkanEngine::init_scene(entt::registry& reg)
+void VulkanEngine::init_scene(flecs::world& world)
 {
 	RenderObject monkey = {};
 	monkey.mesh = get_mesh("monkey");
 	monkey.material = get_material("defaultmesh");
-	monkey.transformMatrix = glm::mat4{ 1.0f };
 
-	auto monkey_ent = reg.create();
-	reg.emplace<MeshComponent>(monkey_ent, monkey.mesh, monkey.material);
-	reg.emplace<Transform>(monkey_ent, glm::mat4{ 1.0f });
+	auto monkey_ent = world.entity("monke");
+	monkey_ent.set<MeshComponent>({monkey.mesh, monkey.material});
+	monkey_ent.set<Transform>({glm::mat4{ 1.0f }});
 
-	_renderables.push_back(monkey);
+	//_renderables.push_back(monkey);
 
 	for (int x = -20; x <= 20; x++) {
 		for (int y = -20; y <= 20; y++) {
@@ -981,13 +981,12 @@ void VulkanEngine::init_scene(entt::registry& reg)
 			tri.material = get_material("defaultmesh");
 			glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(x, 0, y));
 			glm::mat4 scale = glm::scale(glm::mat4{ 1.0 }, glm::vec3(0.2, 0.2, 0.2));
-			tri.transformMatrix = translation * scale;
+			auto trans = translation * scale;
 
-			auto ent = reg.create();
-			reg.emplace<MeshComponent>(ent, monkey.mesh, monkey.material);
-			reg.emplace<Transform>(ent, translation * scale);
-
-			_renderables.push_back(tri);
+			auto str = "triangle_" + std::to_string(x) + "_" + std::to_string(y);
+			auto ent = world.entity(str.c_str());
+			ent.set<MeshComponent>({tri.mesh, tri.material});
+			ent.set<Transform>({ trans });
 		}
 	}
 }

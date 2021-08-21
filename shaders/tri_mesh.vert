@@ -30,7 +30,7 @@ layout( push_constant ) uniform constants
 
 void main()
 {
-    mat4 modelMatrix = objectBuffer.objects[gl_BaseInstance].model;
+    mat4 modelMatrix = PushConstants.render_matrix;
     mat4 transformMatrix = (cameraData.viewproj * modelMatrix);
     gl_Position = transformMatrix * vec4(vPosition, 1.0f);
     outColor = vColor;

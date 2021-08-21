@@ -7,23 +7,27 @@
 
 #include <components/Transform.h>
 #include <components/Camera.h>
+#include <flecs.h>
 
 int main() {
+	printf("dupa\n");
+
 	VulkanEngine engine;
 
 	entt::registry reg;
+	flecs::world ecs(0, 0);
 
-	wrenpp::VM vm{};
-	Vector3::bind_methods(vm);
-	vm.executeModule("assets/scripts/core/math");
+	auto camEntity = ecs.entity("Camera");
+	camEntity.set<Transform>({glm::mat4(1.f)});
+	camEntity.add<Camera>();
 
-	auto camera_ent = reg.create();
-	reg.emplace<Transform>(camera_ent, Transform{glm::mat4(1.f)});
-	reg.emplace<Camera>(camera_ent);
+	//wrenpp::VM vm{};
+	//Vector3::bind_methods(vm);
+	//vm.executeModule("assets/scripts/core/math");
 
-	engine.init(reg);
+	engine.init(ecs);
 
-	engine.run(reg);
+	engine.run(ecs);
 
 	engine.cleanup();
 

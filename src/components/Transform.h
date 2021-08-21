@@ -25,10 +25,8 @@ struct Vector3 {
 	static void bind_methods(wrenpp::VM& vm);
 };
 
-class Transform{
-public:
-	explicit Transform(glm::mat4x4 mat) : transform(mat) {}
-	glm::mat4x4 transform;
+struct Transform{
+	glm::mat4 transform;
 
 
 };
