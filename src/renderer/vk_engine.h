@@ -110,6 +110,7 @@ public:
 
 class VulkanEngine {
 public:
+	static PFN_vkSetDebugUtilsObjectNameEXT setObjectDebugName;
 
 	bool _isInitialized{ false };
 	int _frameNumber {0};
@@ -236,6 +237,12 @@ private:
 
 	size_t pad_uniform_buffer_size(size_t originalSize);
 };
+
+VKAPI_ATTR VkBool32 VKAPI_CALL debug_utils_messenger_callback(
+		VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
+		VkDebugUtilsMessageTypeFlagsEXT message_type,
+		const VkDebugUtilsMessengerCallbackDataEXT* callback_data,
+		void* user_data);
 
 
 #endif //BEST_ENGINE_VK_ENGINE_H

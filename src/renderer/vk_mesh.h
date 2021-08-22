@@ -9,6 +9,7 @@
 #include "vk_types.h"
 #include <vector>
 #include <glm/vec3.hpp>
+#include "vk_buffer.h"
 
 struct VertexInputDescription {
 

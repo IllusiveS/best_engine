@@ -21,20 +21,7 @@
 #include <components/Transform.h>
 #include <components/MeshComponent.h>
 
-
-
-//we want to immediately abort when there is an error. In normal engines this would give an error message to the user, or perform a dump of state.
-
-#define VK_CHECK(x)                                                 \
-	do                                                              \
-	{                                                               \
-		VkResult err = x;                                           \
-		if (err)                                                    \
-		{                                                           \
-			std::cout <<"Detected Vulkan error: " << err << std::endl; \
-			abort();                                                \
-		}                                                           \
-	} while (0)
+PFN_vkSetDebugUtilsObjectNameEXT VulkanEngine::setObjectDebugName = nullptr;
 
 VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass) {
 	//make viewport state from our stored viewport and scissor.
@@ -113,6 +100,9 @@ void VulkanEngine::init(flecs::world &world)
 	//load the core Vulkan structures
 	init_vulkan();
 
+	auto thing = vkGetDeviceProcAddr(_device, "vkSetDebugUtilsObjectNameEXT");
+	setObjectDebugName = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(thing);
+
 	//create the swapchain
 	init_swapchain();
 
@@ -136,15 +126,61 @@ void VulkanEngine::init(flecs::world &world)
 	_isInitialized = true;
 }
 
+VKAPI_ATTR VkBool32 VKAPI_CALL debug_utils_messenger_callback(
+	VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
+	VkDebugUtilsMessageTypeFlagsEXT message_type,
+	const VkDebugUtilsMessengerCallbackDataEXT* callback_data,
+	void* user_data)
+{
+	if(message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+	{
+		std::cout << "Warning: " << callback_data->messageIdNumber << ":" << callback_data->pMessageIdName << ":" << callback_data->pMessage << std::endl;
+	}
+	else if(message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+	{
+		std::cerr << "Error: " << callback_data->messageIdNumber << ":" << callback_data->pMessageIdName << ":" << callback_data->pMessage << std::endl;
+	}
+	return VK_FALSE;
+}
+
 void VulkanEngine::init_vulkan()
 {
 	vkb::InstanceBuilder builder;
 
+	auto system_info_ret = vkb::SystemInfo::get_system_info();
+	if(!system_info_ret)
+	{
+		//printf("%s\n", system_info_ret.error().message());
+		return;
+	}
+	auto system_info = system_info_ret.value();
+
+	builder.request_validation_layers(true)
+		.use_default_debug_messenger();
+
+	VkDebugUtilsMessengerCreateInfoEXT debug_utils_create_info = { VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT };
+
+	debug_utils_create_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
+	debug_utils_create_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+	debug_utils_create_info.pfnUserCallback = debug_utils_messenger_callback;
+
+	if(system_info.is_extension_available(VK_EXT_DEBUG_UTILS_EXTENSION_NAME))
+	{
+		builder.enable_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	}
+	else
+	{
+		assert(false);
+	}
+
+	if(system_info.validation_layers_available)
+	{
+		builder.enable_validation_layers();
+	}
+
 	//make the Vulkan instance, with basic debug features
 	auto inst_ret = builder.set_app_name("Example Vulkan Application")
-		.request_validation_layers(true)
 		.require_api_version(1, 2, 0)
-		.use_default_debug_messenger()
 		.build();
 
 	vkb::Instance vkb_inst = inst_ret.value();
@@ -1081,15 +1117,29 @@ void VulkanEngine::init_descriptors()
 
 	const size_t sceneParamBufferSize = FRAME_OVERLAP * pad_uniform_buffer_size(sizeof(GPUSceneData));
 
-	_sceneParameterBuffer = create_buffer(sceneParamBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-
+	BufferBuilder sceneParameterBuilder;
+	_sceneParameterBuffer = sceneParameterBuilder.withAllocator(_allocator)
+		.withDebugName("Scene param buffer")
+		.withSize(sceneParamBufferSize)
+		.withUsageForUniform()
+		.build();
 
 	for (int i = 0; i < FRAME_OVERLAP; i++)
 	{
-		_frames[i].cameraBuffer = create_buffer(sizeof(GPUCameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		BufferBuilder cameraParameterBuilder;
+		_frames[i].cameraBuffer = cameraParameterBuilder.withAllocator(_allocator)
+			.withDebugName("Camera data buffer")
+			.withSize(sizeof(GPUCameraData))
+			.withUsageForUniform()
+			.build();
 
 		const int MAX_OBJECTS = 10000;
-		_frames[i].objectBuffer = create_buffer(sizeof(GPUObjectData) * MAX_OBJECTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		BufferBuilder GPUObjectParameterBuilder;
+		_frames[i].objectBuffer = GPUObjectParameterBuilder.withAllocator(_allocator)
+			.withDebugName("GPUObjectParameterBuilder")
+			.withSize(sizeof(GPUObjectData) * MAX_OBJECTS)
+			.withUsageForStorage()
+			.build();
 
 		VkDescriptorSetAllocateInfo allocInfo = {};
 		allocInfo.pNext = nullptr;
