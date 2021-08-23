@@ -7,6 +7,8 @@
 
 #include "vk_types.h"
 
+#include "vk_buffer.h"
+
 #include <vector>
 #include <functional>
 #include <deque>
@@ -19,6 +21,8 @@
 #include <entt.hpp>
 
 #include <flecs.h>
+
+
 
 constexpr unsigned int FRAME_OVERLAP = 2;
 
@@ -59,6 +63,7 @@ struct FrameData {
 struct Material {
 	VkPipeline pipeline;
 	VkPipelineLayout pipelineLayout;
+	VkDescriptorSet textureSet{ VK_NULL_HANDLE };
 };
 
 struct RenderObject {
@@ -90,6 +95,13 @@ struct DeletionQueue
 	}
 };
 
+struct UploadContext
+{
+	VkFence _uploadFence;
+	VkCommandPool _commandPool;
+};
+
+
 class PipelineBuilder {
 public:
 
@@ -111,6 +123,9 @@ public:
 class VulkanEngine {
 public:
 	static PFN_vkSetDebugUtilsObjectNameEXT setObjectDebugName;
+
+	UploadContext _uploadContext;
+	void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
 
 	bool _isInitialized{ false };
 	int _frameNumber {0};
@@ -189,10 +204,14 @@ public:
 	std::vector<RenderObject> _renderables;
 
 	std::unordered_map<std::string,Material> _materials;
-	std::unordered_map<std::string,Mesh> _meshes;
+	std::unordered_map<std::string, Mesh> _meshes;
+	std::unordered_map<std::string, Texture> _loadedTextures;
+
+	void load_images();
 
 	VkDescriptorSetLayout _globalSetLayout;
 	VkDescriptorSetLayout _objectSetLayout;
+	VkDescriptorSetLayout _singleTextureSetLayout;
 
 	VkDescriptorPool _descriptorPool;
 

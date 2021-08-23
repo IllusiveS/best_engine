@@ -28,6 +28,7 @@ string(STRIP "${SDL2_LIBRARIES}" SDL2_LIBRARIES)
 
 include_directories(src/)
 include_directories(third_party)
+include_directories(third_party/stb)
 include_directories(third_party/vk-bootstrap/src)
 include_directories(third_party/taskflow/taskflow)
 include_directories(third_party/tracy/)
