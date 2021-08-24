@@ -11,8 +11,6 @@ target_compile_definitions(best_engine PRIVATE TRACY_ENABLE)
 
 find_package(Vulkan REQUIRED)
 
-add_subdirectory(third_party)
-
 #SDL2.0
 set(SDL2_DIR "P:/zig/sdl2.0")
 set(SDL2_INCLUDE_DIR "${SDL2_DIR}/include")
@@ -25,6 +23,8 @@ else ()
 endif ()
 
 string(STRIP "${SDL2_LIBRARIES}" SDL2_LIBRARIES)
+
+add_subdirectory(third_party)
 
 include_directories(src/)
 include_directories(third_party)
@@ -50,12 +50,11 @@ ENDIF()
 target_include_directories(best_engine PRIVATE Vulkan::Vulkan)
 target_include_directories(best_engine PRIVATE ${SDL2_INCLUDE_DIR})
 
-add_compile_definitions(TRACY_ENABLE)
-
 target_link_libraries(best_engine wren)
 target_link_libraries(best_engine Vulkan::Vulkan)
 target_link_libraries(best_engine flecs)
 target_link_libraries(best_engine ${SDL2_LIBRARIES})
+target_link_libraries(best_engine imgui)
 
 find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)
 
