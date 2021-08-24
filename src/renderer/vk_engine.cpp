@@ -21,9 +21,12 @@
 #include <components/Transform.h>
 #include <components/MeshComponent.h>
 
+#include <Tracy.hpp>
+
 PFN_vkSetDebugUtilsObjectNameEXT VulkanEngine::setObjectDebugName = nullptr;
 
 VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass) {
+	ZoneScoped;
 	//make viewport state from our stored viewport and scissor.
 	//at the moment we won't support multiple viewports or scissors
 	VkPipelineViewportStateCreateInfo viewportState = {};
@@ -82,6 +85,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass) {
 
 void VulkanEngine::init(flecs::world &world)
 {
+	ZoneScoped;
 	// We initialize SDL and create a window with it.
 	SDL_Init(SDL_INIT_VIDEO);
 
@@ -147,6 +151,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_utils_messenger_callback(
 
 void VulkanEngine::init_vulkan()
 {
+	ZoneScoped;
 	vkb::InstanceBuilder builder;
 
 	auto system_info_ret = vkb::SystemInfo::get_system_info();
@@ -230,6 +235,7 @@ void VulkanEngine::init_vulkan()
 
 void VulkanEngine::init_swapchain()
 {
+	ZoneScoped;
 	vkb::SwapchainBuilder swapchainBuilder{ _chosenGPU,_device,_surface };
 
 	vkb::Swapchain vkbSwapchain = swapchainBuilder
@@ -286,6 +292,7 @@ void VulkanEngine::init_swapchain()
 
 void VulkanEngine::init_commands()
 {
+	ZoneScoped;
 	//create a command pool for commands submitted to the graphics queue.
 	//we also want the pool to allow for resetting of individual command buffers
 	VkCommandPoolCreateInfo commandPoolInfo = vkinit::command_pool_create_info(_graphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
@@ -318,6 +325,7 @@ void VulkanEngine::init_commands()
 
 void VulkanEngine::init_default_renderpass()
 {
+	ZoneScoped;
 	// the renderpass will use this color attachment.
 	VkAttachmentDescription color_attachment = {};
 	//the attachment will have the format needed by the swapchain
@@ -388,6 +396,7 @@ void VulkanEngine::init_default_renderpass()
 
 void VulkanEngine::init_framebuffers()
 {
+	ZoneScoped;
 	//create the framebuffers for the swapchain images. This will connect the render-pass to the images for rendering
 	VkFramebufferCreateInfo fb_info = vkinit::framebuffer_create_info(_renderPass, _windowExtent);
 
@@ -414,6 +423,7 @@ void VulkanEngine::init_framebuffers()
 
 void VulkanEngine::init_sync_structures()
 {
+	ZoneScoped;
 	VkFenceCreateInfo fenceCreateInfo = vkinit::fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
 
 	VkSemaphoreCreateInfo semaphoreCreateInfo = vkinit::semaphore_create_info();
@@ -449,7 +459,9 @@ void VulkanEngine::init_sync_structures()
 
 }
 
-void VulkanEngine::init_pipelines(){
+void VulkanEngine::init_pipelines()
+{
+	ZoneScoped;
 
 	VkShaderModule texturedMeshShader;
 	if(!load_shader_module("../shaders/textured_lit.frag.spv", &texturedMeshShader))
@@ -633,7 +645,7 @@ void VulkanEngine::init_pipelines(){
 	//we start from  the normal mesh layout
 	VkPipelineLayoutCreateInfo textured_pipeline_layout_info = mesh_pipeline_layout_info;
 
-	VkDescriptorSetLayout texturedSetLayouts[] = { _globalSetLayout, _objectSetLayout,_singleTextureSetLayout };
+	VkDescriptorSetLayout texturedSetLayouts[] = { _globalSetLayout, _objectSetLayout, _singleTextureSetLayout };
 
 	textured_pipeline_layout_info.setLayoutCount = 3;
 	textured_pipeline_layout_info.pSetLayouts = texturedSetLayouts;
@@ -651,7 +663,7 @@ void VulkanEngine::init_pipelines(){
 
 	pipelineBuilder._pipelineLayout = texturedPipeLayout;
 	VkPipeline texPipeline = pipelineBuilder.build_pipeline(_device, _renderPass);
-	create_material(texPipeline, _meshPipelineLayout, "texturedmesh");
+	create_material(texPipeline, texturedPipeLayout, "texturedmesh");
 
 	//deleting all of the vulkan shaders
 	vkDestroyShaderModule(_device, meshVertShader, nullptr);
@@ -674,6 +686,7 @@ void VulkanEngine::init_pipelines(){
 
 void VulkanEngine::load_meshes()
 {
+	ZoneScoped;
 	//make the array 3 vertices long
 	_triangleMesh._vertices.resize(3);
 
@@ -704,6 +717,7 @@ void VulkanEngine::load_meshes()
 
 void VulkanEngine::upload_mesh(Mesh& mesh)
 {
+	ZoneScoped;
 	const size_t bufferSize = mesh._vertices.size() * sizeof(Vertex);
 
 	BufferBuilder stagingBufferBuilder;
@@ -752,6 +766,7 @@ void VulkanEngine::upload_mesh(Mesh& mesh)
 
 void VulkanEngine::cleanup()
 {
+	ZoneScoped;
 	if (_isInitialized) {
 
 		vkDeviceWaitIdle(_device);
@@ -770,6 +785,7 @@ void VulkanEngine::cleanup()
 
 void VulkanEngine::draw(flecs::world& world)
 {
+	ZoneScoped;
 	//wait until the GPU has finished rendering the last frame. Timeout of 1 second
 	VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
 	VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._renderFence));
@@ -870,6 +886,7 @@ void VulkanEngine::draw(flecs::world& world)
 
 bool VulkanEngine::load_shader_module(const char* filePath, VkShaderModule* outShaderModule)
 {
+	ZoneScoped;
 	//open the file. With cursor at the end
 	std::ifstream file(filePath, std::ios::ate | std::ios::binary);
 
@@ -924,6 +941,7 @@ void VulkanEngine::run(flecs::world& world)
 	//main loop
 	while (!bQuit)
 	{
+		FrameMark;
 		//Handle events on queue
 		while (SDL_PollEvent(&e) != 0)
 		{
@@ -939,6 +957,7 @@ void VulkanEngine::run(flecs::world& world)
 
 Material* VulkanEngine::create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string& name)
 {
+	ZoneScoped;
 	Material mat = {};
 	mat.pipeline = pipeline;
 	mat.pipelineLayout = layout;
@@ -948,6 +967,7 @@ Material* VulkanEngine::create_material(VkPipeline pipeline, VkPipelineLayout la
 
 Material* VulkanEngine::get_material(const std::string& name)
 {
+	ZoneScoped;
 	//search for the object, and return nullpointer if not found
 	auto it = _materials.find(name);
 	if (it == _materials.end()) {
@@ -961,6 +981,7 @@ Material* VulkanEngine::get_material(const std::string& name)
 
 Mesh* VulkanEngine::get_mesh(const std::string& name)
 {
+	ZoneScoped;
 	auto it = _meshes.find(name);
 	if (it == _meshes.end()) {
 		return nullptr;
@@ -973,6 +994,7 @@ Mesh* VulkanEngine::get_mesh(const std::string& name)
 
 void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int count, flecs::world& world)
 {
+	ZoneScoped;
 	void* objectData;
 	vmaMapMemory(_allocator, get_current_frame().objectBuffer._allocation, &objectData);
 
@@ -990,7 +1012,8 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 
 	static auto q = world.query<const Camera, const Transform>();
 
-	q.each([&](const Camera& cam, const Transform& transform) {
+	q.each([&](const Camera& cam, const Transform& transform)
+		{
 		const glm::mat4 inverted = glm::inverse(transform.transform);
 		const glm::vec3 forward = normalize(glm::vec3(inverted[3]));
 		camPos = forward;
@@ -1035,9 +1058,7 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 	static auto renderables_query = world.query<const MeshComponent, const Transform>();
 
 	renderables_query.each([&](flecs::entity e, const MeshComponent &mesh, const Transform &transform){
-		//std::cout << e.name() << std::endl;
-
-		//only bind the pipeline if it doesn't match with the already bound one
+		ZoneScopedN("single render");
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh._material->pipeline);
 
 		//camera data descriptor
@@ -1076,6 +1097,7 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 
 void VulkanEngine::init_scene(flecs::world& world)
 {
+	ZoneScoped;
 	RenderObject monkey = {};
 	monkey.mesh = get_mesh("monkey");
 	monkey.material = get_material("defaultmesh");
@@ -1142,6 +1164,7 @@ FrameData& VulkanEngine::get_current_frame()
 
 AllocatedBuffer VulkanEngine::create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage)
 {
+	ZoneScoped;
 	//allocate vertex buffer
 	VkBufferCreateInfo bufferInfo = {};
 	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -1167,6 +1190,7 @@ AllocatedBuffer VulkanEngine::create_buffer(size_t allocSize, VkBufferUsageFlags
 
 void VulkanEngine::init_descriptors()
 {
+	ZoneScoped;
 	//create a descriptor pool that will hold 10 uniform buffers
 	std::vector<VkDescriptorPoolSize> sizes =
 		{
@@ -1207,16 +1231,6 @@ void VulkanEngine::init_descriptors()
 
 	VkDescriptorSetLayoutBinding textureBind = vkinit::descriptorset_layout_binding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0);
 
-	VkDescriptorSetLayoutCreateInfo set3info = {};
-	set3info.bindingCount = 1;
-	set3info.flags = 0;
-	set3info.pNext = nullptr;
-	set3info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	set3info.pBindings = &textureBind;
-
-	vkCreateDescriptorSetLayout(_device, &set3info, nullptr, &_singleTextureSetLayout);
-
-
 	VkDescriptorSetLayoutCreateInfo setinfo = {};
 	setinfo.flags = 0;
 	setinfo.pNext = nullptr;
@@ -1235,6 +1249,15 @@ void VulkanEngine::init_descriptors()
 	set2info.pBindings = &objectBind;
 
 	vkCreateDescriptorSetLayout(_device, &set2info, nullptr, &_objectSetLayout);
+
+	VkDescriptorSetLayoutCreateInfo set3info = {};
+	set3info.bindingCount = 1;
+	set3info.flags = 0;
+	set3info.pNext = nullptr;
+	set3info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	set3info.pBindings = &textureBind;
+
+	vkCreateDescriptorSetLayout(_device, &set3info, nullptr, &_singleTextureSetLayout);
 
 	const size_t sceneParamBufferSize = FRAME_OVERLAP * pad_uniform_buffer_size(sizeof(GPUSceneData));
 
@@ -1326,6 +1349,7 @@ void VulkanEngine::init_descriptors()
 
 size_t VulkanEngine::pad_uniform_buffer_size(size_t originalSize)
 {
+	ZoneScoped;
 	// Calculate required alignment based on minimum device offset alignment
 	size_t minUboAlignment = _gpuProperties.limits.minUniformBufferOffsetAlignment;
 	size_t alignedSize = originalSize;
@@ -1337,6 +1361,7 @@ size_t VulkanEngine::pad_uniform_buffer_size(size_t originalSize)
 
 void VulkanEngine::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function)
 {
+	ZoneScoped;
 	//allocate the default command buffer that we will use for the instant commands
 	VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(_uploadContext._commandPool, 1);
 
@@ -1369,6 +1394,7 @@ void VulkanEngine::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& f
 
 void VulkanEngine::load_images()
 {
+	ZoneScoped;
 	Texture lostEmpire;
 
 	vkinit::load_image_from_file(*this, "assets/lost_empire-RGBA.png", lostEmpire.image);
