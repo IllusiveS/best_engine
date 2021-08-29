@@ -22,6 +22,9 @@
 #include <components/MeshComponent.h>
 
 #include <Tracy.hpp>
+#include <imgui.h>
+#include "backends/imgui_impl_sdl.h"
+#include "backends/imgui_impl_vulkan.h"
 
 PFN_vkSetDebugUtilsObjectNameEXT VulkanEngine::setObjectDebugName = nullptr;
 
@@ -128,8 +131,79 @@ void VulkanEngine::init(flecs::world &world)
 
 	init_scene(world);
 
+	init_imgui();
+
 	//everything went fine
 	_isInitialized = true;
+}
+
+void VulkanEngine::init_imgui()
+{
+	//1: create descriptor pool for IMGUI
+	// the size of the pool is very oversize, but it's copied from imgui demo itself.
+	VkDescriptorPoolSize pool_sizes[] =
+	{
+		{ VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+		{ VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+	};
+
+	VkDescriptorPoolCreateInfo pool_info = {};
+	pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	pool_info.maxSets = 1000;
+	pool_info.poolSizeCount = std::size(pool_sizes);
+	pool_info.pPoolSizes = pool_sizes;
+
+	VkDescriptorPool imguiPool;
+	VK_CHECK(vkCreateDescriptorPool(_device, &pool_info, nullptr, &imguiPool));
+
+
+	// 2: initialize imgui library
+
+	//this initializes the core structures of imgui
+	ImGui::CreateContext();
+
+	//this initializes imgui for SDL
+	ImGui_ImplSDL2_InitForVulkan(_window);
+
+	//this initializes imgui for Vulkan
+	ImGui_ImplVulkan_InitInfo init_info = {};
+	init_info.Instance = _instance;
+	init_info.PhysicalDevice = _chosenGPU;
+	init_info.Device = _device;
+	init_info.Queue = _graphicsQueue;
+	init_info.DescriptorPool = imguiPool;
+	init_info.MinImageCount = 3;
+	init_info.ImageCount = 3;
+	init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+
+	ImGui_ImplVulkan_Init(&init_info, _renderPass);
+
+	//execute a gpu command to upload imgui font textures
+	immediate_submit([&](VkCommandBuffer cmd)
+		{
+			ImGui_ImplVulkan_CreateFontsTexture(cmd);
+		});
+
+	//clear font textures from cpu data
+	ImGui_ImplVulkan_DestroyFontUploadObjects();
+
+	//add the destroy the imgui created structures
+	_mainDeletionQueue.push_function([=]()
+		{
+
+			vkDestroyDescriptorPool(_device, imguiPool, nullptr);
+			ImGui_ImplVulkan_Shutdown();
+		});
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debug_utils_messenger_callback(
@@ -459,80 +533,29 @@ void VulkanEngine::init_sync_structures()
 
 }
 
-void VulkanEngine::init_pipelines()
+void VulkanEngine::init_textured_pipeline()
 {
 	ZoneScoped;
 
+	//SHADERY
 	VkShaderModule texturedMeshShader;
 	if(!load_shader_module("../shaders/textured_lit.frag.spv", &texturedMeshShader))
 	{
 		std::cout << "Error when building the textured mesh shader" << std::endl;
 	}
-
-	VkShaderModule triangleFragShader;
-	if (!load_shader_module("../shaders/colored_triangle.frag.spv", &triangleFragShader))
-	{
-		std::cout << "Error when building the triangle fragment shader module" << std::endl;
-	}
-	else {
-		std::cout << "Triangle fragment shader succesfully loaded" << std::endl;
-	}
-
-	VkShaderModule triangleVertexShader;
-	if (!load_shader_module("../shaders/colored_triangle.vert.spv", &triangleVertexShader))
-	{
-		std::cout << "Error when building the triangle vertex shader module" << std::endl;
-
-	}
-	else {
-		std::cout << "Triangle vertex shader succesfully loaded" << std::endl;
-	}
-
-	//compile red triangle modules
-	VkShaderModule redTriangleFragShader;
-	if (!load_shader_module("../shaders/triangle.frag.spv", &redTriangleFragShader))
-	{
-		std::cout << "Error when building the triangle fragment shader module" << std::endl;
-	}
-	else {
-		std::cout << "Red Triangle fragment shader succesfully loaded" << std::endl;
-	}
-
-	VkShaderModule redTriangleVertShader;
-	if (!load_shader_module("../shaders/triangle.vert.spv", &redTriangleVertShader))
+	VkShaderModule meshVertShader;
+	if(!load_shader_module("../shaders/tri_mesh.vert.spv", &meshVertShader))
 	{
 		std::cout << "Error when building the triangle vertex shader module" << std::endl;
 	}
-	else {
+	else
+	{
 		std::cout << "Red Triangle vertex shader succesfully loaded" << std::endl;
 	}
 
-	VkShaderModule colorMeshShader;
-	if (!load_shader_module("../shaders/default_lit.frag.spv", &colorMeshShader))
-	{
-		std::cout << "Error when building the colored mesh shader" << std::endl;
-	}
-
-
-	//build the pipeline layout that controls the inputs/outputs of the shader
-	//we are not using descriptor sets or other systems yet, so no need to use anything other than empty default
-	VkPipelineLayoutCreateInfo pipeline_layout_info = vkinit::pipeline_layout_create_info();
-
-	VK_CHECK(vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr, &_trianglePipelineLayout));
-
-	//build the stage-create-info for both vertex and fragment stages. This lets the pipeline know the shader modules per stage
+	//BAZA DO PIPELINE
 	PipelineBuilder pipelineBuilder;
 	pipelineBuilder._depthStencil = vkinit::depth_stencil_create_info(true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
-
-	pipelineBuilder._shaderStages.push_back(
-			vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, triangleVertexShader));
-
-	pipelineBuilder._shaderStages.push_back(
-			vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, triangleFragShader));
-
-
-	//vertex input controls how to read vertices from vertex buffers. We aren't using it yet
-	pipelineBuilder._vertexInputInfo = vkinit::vertex_input_state_create_info();
 
 	//input assembly is the configuration for drawing triangle lists, strips, or individual points.
 	//we are just going to draw triangle list
@@ -541,8 +564,8 @@ void VulkanEngine::init_pipelines()
 	//build viewport and scissor from the swapchain extents
 	pipelineBuilder._viewport.x = 0.0f;
 	pipelineBuilder._viewport.y = 0.0f;
-	pipelineBuilder._viewport.width = (float)_windowExtent.width;
-	pipelineBuilder._viewport.height = (float)_windowExtent.height;
+	pipelineBuilder._viewport.width = (float) _windowExtent.width;
+	pipelineBuilder._viewport.height = (float) _windowExtent.height;
 	pipelineBuilder._viewport.minDepth = 0.0f;
 	pipelineBuilder._viewport.maxDepth = 1.0f;
 
@@ -561,25 +584,10 @@ void VulkanEngine::init_pipelines()
 	//use the triangle layout we created
 	pipelineBuilder._pipelineLayout = _trianglePipelineLayout;
 
-	//finally build the pipeline
-	_trianglePipeline = pipelineBuilder.build_pipeline(_device, _renderPass);
-
-	//clear the shader stages for the builder
-	pipelineBuilder._shaderStages.clear();
-
-	//add the other shaders
-	pipelineBuilder._shaderStages.push_back(
-			vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, redTriangleVertShader));
-
-	pipelineBuilder._shaderStages.push_back(
-			vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, redTriangleFragShader));
-
-	//build the red triangle pipeline
-	_redTrianglePipeline = pipelineBuilder.build_pipeline(_device, _renderPass);
-
-	//build the mesh pipeline
-
 	VertexInputDescription vertexDescription = Vertex::get_vertex_description();
+
+	//vertex input controls how to read vertices from vertex buffers. We aren't using it yet
+	pipelineBuilder._vertexInputInfo = vkinit::vertex_input_state_create_info();
 
 	//connect the pipeline builder vertex input info to the one we get from Vertex
 	pipelineBuilder._vertexInputInfo.pVertexAttributeDescriptions = vertexDescription.attributes.data();
@@ -588,28 +596,11 @@ void VulkanEngine::init_pipelines()
 	pipelineBuilder._vertexInputInfo.pVertexBindingDescriptions = vertexDescription.bindings.data();
 	pipelineBuilder._vertexInputInfo.vertexBindingDescriptionCount = vertexDescription.bindings.size();
 
-	//clear the shader stages for the builder
-	pipelineBuilder._shaderStages.clear();
-
-	//compile mesh vertex shader
-
-
-	VkShaderModule meshVertShader;
-	if (!load_shader_module("../shaders/tri_mesh.vert.spv", &meshVertShader))
-	{
-		std::cout << "Error when building the triangle vertex shader module" << std::endl;
-	}
-	else {
-		std::cout << "Red Triangle vertex shader succesfully loaded" << std::endl;
-	}
-
-	//add the other shaders
+	//create pipeline for textured drawing
 	pipelineBuilder._shaderStages.push_back(
-			vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, meshVertShader));
-
-	//make sure that triangleFragShader is holding the compiled colored_triangle.frag
+		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, meshVertShader));
 	pipelineBuilder._shaderStages.push_back(
-			vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, colorMeshShader));
+		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, texturedMeshShader));
 
 	//we start from just the default empty pipeline layout info
 	VkPipelineLayoutCreateInfo mesh_pipeline_layout_info = vkinit::pipeline_layout_create_info();
@@ -626,52 +617,120 @@ void VulkanEngine::init_pipelines()
 	mesh_pipeline_layout_info.pPushConstantRanges = &push_constant;
 	mesh_pipeline_layout_info.pushConstantRangeCount = 1;
 
-	VkDescriptorSetLayout setLayouts[] = { _globalSetLayout, _objectSetLayout };
+	VkDescriptorSetLayout setLayouts[] = { _globalSetLayout, _objectSetLayout, _singleTextureSetLayout };
 
-	mesh_pipeline_layout_info.setLayoutCount = 2;
+	mesh_pipeline_layout_info.setLayoutCount = 3;
 	mesh_pipeline_layout_info.pSetLayouts = setLayouts;
 
-
-	VK_CHECK(vkCreatePipelineLayout(_device, &mesh_pipeline_layout_info, nullptr, &_meshPipelineLayout));
-
-
-	pipelineBuilder._pipelineLayout = _meshPipelineLayout;
-
-	//build the mesh triangle pipeline
-	_meshPipeline = pipelineBuilder.build_pipeline(_device, _renderPass);
-
-	create_material(_meshPipeline, _meshPipelineLayout, "defaultmesh");
-
-	//we start from  the normal mesh layout
-	VkPipelineLayoutCreateInfo textured_pipeline_layout_info = mesh_pipeline_layout_info;
-
-	VkDescriptorSetLayout texturedSetLayouts[] = { _globalSetLayout, _objectSetLayout, _singleTextureSetLayout };
-
-	textured_pipeline_layout_info.setLayoutCount = 3;
-	textured_pipeline_layout_info.pSetLayouts = texturedSetLayouts;
-
 	VkPipelineLayout texturedPipeLayout;
-	VK_CHECK(vkCreatePipelineLayout(_device, &textured_pipeline_layout_info, nullptr, &texturedPipeLayout));
-
-	//create pipeline for textured drawing
-
-	pipelineBuilder._shaderStages.clear();
-	pipelineBuilder._shaderStages.push_back(
-		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, meshVertShader));
-	pipelineBuilder._shaderStages.push_back(
-		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, texturedMeshShader));
+	VK_CHECK(vkCreatePipelineLayout(_device, &mesh_pipeline_layout_info, nullptr, &texturedPipeLayout));
 
 	pipelineBuilder._pipelineLayout = texturedPipeLayout;
 	VkPipeline texPipeline = pipelineBuilder.build_pipeline(_device, _renderPass);
 	create_material(texPipeline, texturedPipeLayout, "texturedmesh");
 
-	//deleting all of the vulkan shaders
 	vkDestroyShaderModule(_device, meshVertShader, nullptr);
-	vkDestroyShaderModule(_device, redTriangleVertShader, nullptr);
-	vkDestroyShaderModule(_device, redTriangleFragShader, nullptr);
-	vkDestroyShaderModule(_device, triangleFragShader, nullptr);
-	vkDestroyShaderModule(_device, triangleVertexShader, nullptr);
-	vkDestroyShaderModule(_device, colorMeshShader, nullptr);
+	vkDestroyShaderModule(_device, texturedMeshShader, nullptr);
+}
+
+void VulkanEngine::init_debug_pipeline()
+{
+	ZoneScoped;
+	//SHADERY
+	VkShaderModule debugLineFragShader;
+	if(!load_shader_module("../shaders/debug_line.frag.spv", &debugLineFragShader))
+	{
+		std::cout << "Error when building the textured mesh shader" << std::endl;
+	}
+	VkShaderModule debugLineVertShader;
+	if(!load_shader_module("../shaders/debug_line.vert.spv", &debugLineVertShader))
+	{
+		std::cout << "Error when building the triangle vertex shader module" << std::endl;
+	}
+	else
+	{
+		std::cout << "Red Triangle vertex shader succesfully loaded" << std::endl;
+	}
+
+	//BAZA DO PIPELINE
+	PipelineBuilder pipelineBuilder;
+	pipelineBuilder._depthStencil = vkinit::depth_stencil_create_info(true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
+
+	//input assembly is the configuration for drawing triangle lists, strips, or individual points.
+	//we are just going to draw triangle list
+	pipelineBuilder._inputAssembly = vkinit::input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
+
+	//build viewport and scissor from the swapchain extents
+	pipelineBuilder._viewport.x = 0.0f;
+	pipelineBuilder._viewport.y = 0.0f;
+	pipelineBuilder._viewport.width = (float) _windowExtent.width;
+	pipelineBuilder._viewport.height = (float) _windowExtent.height;
+	pipelineBuilder._viewport.minDepth = 0.0f;
+	pipelineBuilder._viewport.maxDepth = 1.0f;
+
+	pipelineBuilder._scissor.offset = { 0, 0 };
+	pipelineBuilder._scissor.extent = _windowExtent;
+
+	//configure the rasterizer to draw filled triangles
+	pipelineBuilder._rasterizer = vkinit::rasterization_state_create_info(VK_POLYGON_MODE_FILL);
+
+	//we don't use multisampling, so just run the default one
+	pipelineBuilder._multisampling = vkinit::multisampling_state_create_info();
+
+	//a single blend attachment with no blending and writing to RGBA
+	pipelineBuilder._colorBlendAttachment = vkinit::color_blend_attachment_state();
+
+	//use the triangle layout we created
+	pipelineBuilder._pipelineLayout = _trianglePipelineLayout;
+
+	VertexInputDescription vertexDescription = Vertex::get_vertex_description();
+
+	//vertex input controls how to read vertices from vertex buffers. We aren't using it yet
+	pipelineBuilder._vertexInputInfo = vkinit::vertex_input_state_create_info();
+
+	//create pipeline for textured drawing
+	pipelineBuilder._shaderStages.push_back(
+		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, debugLineVertShader));
+	pipelineBuilder._shaderStages.push_back(
+		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, debugLineFragShader));
+
+	//we start from just the default empty pipeline layout info
+	VkPipelineLayoutCreateInfo mesh_pipeline_layout_info = vkinit::pipeline_layout_create_info();
+
+	//setup push constants
+	VkPushConstantRange push_constant;
+	//offset 0
+	push_constant.offset = 0;
+	//size of a MeshPushConstant struct
+	push_constant.size = sizeof(DebugPushConstants);
+	//for the vertex shader
+	push_constant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+	mesh_pipeline_layout_info.pPushConstantRanges = &push_constant;
+	mesh_pipeline_layout_info.pushConstantRangeCount = 1;
+
+	VkDescriptorSetLayout setLayouts[] = { _globalSetLayout };
+
+	mesh_pipeline_layout_info.setLayoutCount = 1;
+	mesh_pipeline_layout_info.pSetLayouts = setLayouts;
+
+	VkPipelineLayout texturedPipeLayout;
+	VK_CHECK(vkCreatePipelineLayout(_device, &mesh_pipeline_layout_info, nullptr, &texturedPipeLayout));
+
+	pipelineBuilder._pipelineLayout = texturedPipeLayout;
+	VkPipeline texPipeline = pipelineBuilder.build_pipeline(_device, _renderPass);
+	create_material(texPipeline, texturedPipeLayout, "debugline");
+
+	vkDestroyShaderModule(_device, debugLineVertShader, nullptr);
+	vkDestroyShaderModule(_device, debugLineFragShader, nullptr);
+}
+
+void VulkanEngine::init_pipelines()
+{
+	ZoneScoped;
+
+	init_textured_pipeline();
+	init_debug_pipeline();
 
 	//adding the pipelines to the deletion queue
 	_mainDeletionQueue.push_function([=]() {
@@ -786,6 +845,8 @@ void VulkanEngine::cleanup()
 void VulkanEngine::draw(flecs::world& world)
 {
 	ZoneScoped;
+	ImGui::Render();
+
 	//wait until the GPU has finished rendering the last frame. Timeout of 1 second
 	VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
 	VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._renderFence));
@@ -831,9 +892,10 @@ void VulkanEngine::draw(flecs::world& world)
 
 	draw_objects(cmd, _renderables.data(), _renderables.size(), world);
 
+	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+
 	//finalize the render pass
 	vkCmdEndRenderPass(cmd);
-
 
 	//finalize the command buffer (we can no longer add commands, but it can now be executed)
 	VK_CHECK(vkEndCommandBuffer(cmd));
@@ -945,11 +1007,21 @@ void VulkanEngine::run(flecs::world& world)
 		//Handle events on queue
 		while (SDL_PollEvent(&e) != 0)
 		{
+			ImGui_ImplSDL2_ProcessEvent(&e);
 			//close the window when user clicks the X button or alt-f4s
 			if (e.type == SDL_QUIT) {
 				bQuit = true;
 			}
 		}
+
+		ImGui_ImplVulkan_NewFrame();
+		ImGui_ImplSDL2_NewFrame(_window);
+
+		ImGui::NewFrame();
+
+
+		//imgui commands
+		ImGui::ShowDemoWindow();
 
 		draw(world);
 	}

@@ -20,6 +20,7 @@ add_compile_definitions(TRACY_ENABLE)
 
 #IMGUI
 add_library(imgui STATIC 
+    ${PROJECT_SOURCE_DIR}/third_party/imgui/imgui.cpp 
     ${PROJECT_SOURCE_DIR}/third_party/imgui/imgui_draw.cpp 
     ${PROJECT_SOURCE_DIR}/third_party/imgui/imgui_demo.cpp
     ${PROJECT_SOURCE_DIR}/third_party/imgui/imgui_tables.cpp

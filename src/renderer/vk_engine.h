@@ -77,6 +77,12 @@ struct MeshPushConstants {
 	glm::mat4 render_matrix;
 };
 
+struct DebugPushConstants
+{
+	glm::vec4 points[2];
+	glm::vec4 color;
+};
+
 struct DeletionQueue
 {
 	std::deque<std::function<void()>> deletors;
@@ -181,6 +187,7 @@ public:
 
 	VkPipelineLayout _trianglePipelineLayout;
 	VkPipelineLayout _meshPipelineLayout;
+	VkPipelineLayout _debugPipelineLayout;
 
 	VkPipeline _trianglePipeline;
 	VkPipeline _redTrianglePipeline;
@@ -248,6 +255,11 @@ private:
 	void init_framebuffers();
 	void init_sync_structures();
 	void init_pipelines();
+
+	void init_textured_pipeline();
+	void init_debug_pipeline();
+
+	void init_imgui();
 
 	void load_meshes();
 	void init_scene(flecs::world& world);

@@ -38,6 +38,7 @@ include_directories(third_party/wren/src/include)
 include_directories(third_party/VulkanMemoryAllocator/include)
 include_directories(third_party/tinyobjloader)
 include_directories(third_party/flecs/include/flecs)
+include_directories(third_party/imgui)
 
 include_directories(${SDL2_INCLUDE_DIR})
 
