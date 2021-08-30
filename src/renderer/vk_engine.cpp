@@ -627,7 +627,11 @@ void VulkanEngine::init_textured_pipeline()
 
 	pipelineBuilder._pipelineLayout = texturedPipeLayout;
 	VkPipeline texPipeline = pipelineBuilder.build_pipeline(_device, _renderPass);
+
 	create_material(texPipeline, texturedPipeLayout, "texturedmesh");
+
+	create_material(pipelineBuilder.build_pipeline(_device, _renderPass), texturedPipeLayout, "green_voxel");
+	create_material(pipelineBuilder.build_pipeline(_device, _renderPass), texturedPipeLayout, "black_voxel");
 
 	vkDestroyShaderModule(_device, meshVertShader, nullptr);
 	vkDestroyShaderModule(_device, texturedMeshShader, nullptr);
@@ -731,16 +735,6 @@ void VulkanEngine::init_pipelines()
 
 	init_textured_pipeline();
 	init_debug_pipeline();
-
-	//adding the pipelines to the deletion queue
-	_mainDeletionQueue.push_function([=]() {
-		vkDestroyPipeline(_device, _redTrianglePipeline, nullptr);
-		vkDestroyPipeline(_device, _trianglePipeline, nullptr);
-		vkDestroyPipeline(_device, _meshPipeline, nullptr);
-
-		vkDestroyPipelineLayout(_device, _trianglePipelineLayout, nullptr);
-		vkDestroyPipelineLayout(_device, _meshPipelineLayout, nullptr);
-	});
 }
 
 void VulkanEngine::load_meshes()
@@ -764,6 +758,10 @@ void VulkanEngine::load_meshes()
 	Mesh lostEmpire{};
 	lostEmpire.load_from_obj("assets/lost_empire.obj");
 
+	Mesh cube{};
+	cube.load_from_obj("assets/cube.obj");
+
+	upload_mesh(cube);
 	upload_mesh(lostEmpire);
 	upload_mesh(_triangleMesh);
 	upload_mesh(_monkeyMesh);
@@ -772,6 +770,7 @@ void VulkanEngine::load_meshes()
 	_meshes["monkey"] = _monkeyMesh;
 	_meshes["triangle"] = _triangleMesh;
 	_meshes["empire"] = lostEmpire;
+	_meshes["cube"] = cube;
 }
 
 void VulkanEngine::upload_mesh(Mesh& mesh)
@@ -1140,10 +1139,10 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 		//object data descriptor
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh._material->pipelineLayout, 1, 1, &get_current_frame().objectDescriptor, 0, nullptr);
 
-		if(mesh._material->textureSet != VK_NULL_HANDLE)
+		if(mesh._material->albedo->textureSet != VK_NULL_HANDLE)
 		{
 			//texture descriptor
-			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh._material->pipelineLayout, 2, 1, &mesh._material->textureSet, 0, nullptr);
+			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh._material->pipelineLayout, 2, 1, &mesh._material->albedo->textureSet, 0, nullptr);
 		}
 		
 
@@ -1170,63 +1169,44 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 void VulkanEngine::init_scene(flecs::world& world)
 {
 	ZoneScoped;
-	RenderObject monkey = {};
-	monkey.mesh = get_mesh("monkey");
-	monkey.material = get_material("defaultmesh");
 
 	/*auto monkey_ent = world.entity("monke");
 	monkey_ent.set<MeshComponent>({monkey.mesh, monkey.material});
 	monkey_ent.set<Transform>({glm::mat4{ 1.0f }});*/
 
-	auto empire_ent = world.entity("empire");
-	empire_ent.set<MeshComponent>({get_mesh("empire"), get_material("texturedmesh")});
-	empire_ent.set<Transform>({ glm::translate(glm::vec3{ 5,-10,0 }) });
+	//auto empire_ent = world.entity("empire");
+	//empire_ent.set<MeshComponent>({get_mesh("empire"), get_material("texturedmesh")});
+	//empire_ent.set<Transform>({ glm::translate(glm::vec3{ 5,-10,0 }) });
 
-	/*for (int x = -20; x <= 20; x++) {
-		for (int y = -20; y <= 20; y++) {
+	for (int x = -20; x <= 20; x++) {
+		for (int y = -20; y <= 0; y++) {
 			RenderObject tri = {};
-			tri.mesh = get_mesh("triangle");
-			tri.material = get_material("defaultmesh");
+			tri.mesh = get_mesh("cube");
+			tri.material = get_material("green_voxel");
 			glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(x, 0, y));
-			glm::mat4 scale = glm::scale(glm::mat4{ 1.0 }, glm::vec3(0.2, 0.2, 0.2));
+			glm::mat4 scale = glm::scale(glm::mat4{ 1.0 }, glm::vec3(0.5, 0.5, 0.5));
 			auto trans = translation * scale;
 
-			auto str = "triangle_" + std::to_string(x) + "_" + std::to_string(y);
+			auto str = "voxel_" + std::to_string(x) + "_" + std::to_string(y);
 			auto ent = world.entity(str.c_str());
 			ent.set<MeshComponent>({tri.mesh, tri.material});
 			ent.set<Transform>({ trans });
 		}
-	}*/
-
-	Material* texturedMat = get_material("texturedmesh");
-
-	VkDescriptorSetAllocateInfo allocInfo = {};
-	allocInfo.pNext = nullptr;
-	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-	allocInfo.descriptorPool = _descriptorPool;
-	allocInfo.descriptorSetCount = 1;
-	allocInfo.pSetLayouts = &_singleTextureSetLayout;
-
-	vkAllocateDescriptorSets(_device, &allocInfo, &texturedMat->textureSet);
-
-	VkSamplerCreateInfo samplerInfo = vkinit::sampler_create_info(VK_FILTER_NEAREST);
-
-	VkSampler blockySampler;
-	vkCreateSampler(_device, &samplerInfo, nullptr, &blockySampler);
-
-	_mainDeletionQueue.push_function([=]()
+		for(int y = 0; y <= 20; y++)
 		{
-			vkDestroySampler(_device, blockySampler, nullptr);
-		});
+			RenderObject tri = {};
+			tri.mesh = get_mesh("cube");
+			tri.material = get_material("black_voxel");
+			glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(x, 0, y));
+			glm::mat4 scale = glm::scale(glm::mat4{ 1.0 }, glm::vec3(0.5, 0.5, 0.5));
+			auto trans = translation * scale;
 
-	VkDescriptorImageInfo imageBufferInfo;
-	imageBufferInfo.sampler = blockySampler;
-	imageBufferInfo.imageView = _loadedTextures["empire_diffuse"].imageView;
-	imageBufferInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-	VkWriteDescriptorSet texture1 = vkinit::write_descriptor_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, texturedMat->textureSet, &imageBufferInfo, 0);
-
-	vkUpdateDescriptorSets(_device, 1, &texture1, 0, nullptr);
+			auto str = "voxel_" + std::to_string(x) + "_" + std::to_string(y);
+			auto ent = world.entity(str.c_str());
+			ent.set<MeshComponent>({ tri.mesh, tri.material });
+			ent.set<Transform>({ trans });
+		}
+	}
 }
 
 FrameData& VulkanEngine::get_current_frame()
@@ -1397,7 +1377,7 @@ void VulkanEngine::init_descriptors()
 
 		VkWriteDescriptorSet objectWrite = vkinit::write_descriptor_buffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, _frames[i].objectDescriptor, &objectBufferInfo, 0);
 
-		VkWriteDescriptorSet setWrites[] = { cameraWrite,sceneWrite,objectWrite };
+		VkWriteDescriptorSet setWrites[] = { cameraWrite, sceneWrite, objectWrite };
 
 		vkUpdateDescriptorSets(_device, 3, setWrites, 0, nullptr);
 	}
@@ -1464,20 +1444,59 @@ void VulkanEngine::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& f
 	vkResetCommandPool(_device, _uploadContext._commandPool, 0);
 }
 
-void VulkanEngine::load_images()
+void VulkanEngine::load_image(const std::string& path, const std::string& texName)
 {
-	ZoneScoped;
-	Texture lostEmpire;
+	Texture newTexture;
 
-	vkinit::load_image_from_file(*this, "assets/lost_empire-RGBA.png", lostEmpire.image);
+	vkinit::load_image_from_file(*this, path.c_str(), newTexture.image);
 
-	VkImageViewCreateInfo imageinfo = vkinit::imageview_create_info(VK_FORMAT_R8G8B8A8_SRGB, lostEmpire.image._image, VK_IMAGE_ASPECT_COLOR_BIT);
-	vkCreateImageView(_device, &imageinfo, nullptr, &lostEmpire.imageView);
+	VkImageViewCreateInfo imageinfo = vkinit::imageview_create_info(VK_FORMAT_R8G8B8A8_SRGB, newTexture.image._image, VK_IMAGE_ASPECT_COLOR_BIT);
+	vkCreateImageView(_device, &imageinfo, nullptr, &newTexture.imageView);
 
 	_mainDeletionQueue.push_function([=]()
 		{
-			vkDestroyImageView(_device, lostEmpire.imageView, nullptr);
+			vkDestroyImageView(_device, newTexture.imageView, nullptr);
 		});
 
-	_loadedTextures["empire_diffuse"] = lostEmpire;
+	VkDescriptorSetAllocateInfo allocInfo = {};
+	allocInfo.pNext = nullptr;
+	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo.descriptorPool = _descriptorPool;
+	allocInfo.descriptorSetCount = 1;
+	allocInfo.pSetLayouts = &_singleTextureSetLayout;
+
+	vkAllocateDescriptorSets(_device, &allocInfo, &newTexture.textureSet);
+
+	VkSamplerCreateInfo samplerInfo = vkinit::sampler_create_info(VK_FILTER_NEAREST);
+
+	VkSampler blockySampler;
+	vkCreateSampler(_device, &samplerInfo, nullptr, &blockySampler);
+
+	_mainDeletionQueue.push_function([=]()
+		{
+			vkDestroySampler(_device, blockySampler, nullptr);
+		});
+
+	VkDescriptorImageInfo imageBufferInfo;
+	imageBufferInfo.sampler = blockySampler;
+	imageBufferInfo.imageView = newTexture.imageView;
+	imageBufferInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	VkWriteDescriptorSet texture1 = vkinit::write_descriptor_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, newTexture.textureSet, &imageBufferInfo, 0);
+
+	vkUpdateDescriptorSets(_device, 1, &texture1, 0, nullptr);
+
+	_loadedTextures[texName] = newTexture;
+}
+
+void VulkanEngine::load_images()
+{
+	ZoneScoped;
+	load_image("assets/lost_empire-RGBA.png", "empire_diffuse");
+	load_image("assets/black.png", "black_voxel");
+	load_image("assets/green.png", "green_voxel");
+
+	Texture* green = &_loadedTextures["green_voxel"];
+	_materials["green_voxel"].albedo = green;
+	_materials["black_voxel"].albedo = &_loadedTextures["black_voxel"];
 }

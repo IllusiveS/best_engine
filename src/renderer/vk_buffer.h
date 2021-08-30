@@ -23,6 +23,7 @@ struct Texture
 {
 	AllocatedImage image;
 	VkImageView imageView;
+	VkDescriptorSet textureSet{ VK_NULL_HANDLE };
 };
 
 struct BufferBuilder

@@ -63,7 +63,7 @@ struct FrameData {
 struct Material {
 	VkPipeline pipeline;
 	VkPipelineLayout pipelineLayout;
-	VkDescriptorSet textureSet{ VK_NULL_HANDLE };
+	Texture* albedo;
 };
 
 struct RenderObject {
@@ -214,6 +214,7 @@ public:
 	std::unordered_map<std::string, Mesh> _meshes;
 	std::unordered_map<std::string, Texture> _loadedTextures;
 
+	void load_image(const std::string& path, const std::string& texName);
 	void load_images();
 
 	VkDescriptorSetLayout _globalSetLayout;
