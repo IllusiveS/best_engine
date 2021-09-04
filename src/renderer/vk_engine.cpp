@@ -21,7 +21,10 @@
 #include <components/Transform.h>
 #include <components/MeshComponent.h>
 
+#include <functional>
+
 #include <Tracy.hpp>
+
 #include <imgui.h>
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_vulkan.h"
@@ -85,6 +88,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass) {
 	}
 }
 
+VulkanEngine::VulkanEngine() : executor(worldThreads) {}
 
 void VulkanEngine::init(flecs::world &world)
 {
@@ -133,8 +137,22 @@ void VulkanEngine::init(flecs::world &world)
 
 	init_imgui();
 
+	init_tracy();
+
 	//everything went fine
 	_isInitialized = true;
+}
+
+void VulkanEngine::init_tracy()
+{
+	VkCommandBuffer tracyBuffer;
+
+	VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(_frames[0]._commandPool, 1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+
+	VK_CHECK(vkAllocateCommandBuffers(_device, &cmdAllocInfo, &tracyBuffer));
+
+	_tracyContext = TracyVkContext(_chosenGPU,
+		_device, _graphicsQueue, tracyBuffer);
 }
 
 void VulkanEngine::init_imgui()
@@ -231,12 +249,11 @@ void VulkanEngine::init_vulkan()
 	auto system_info_ret = vkb::SystemInfo::get_system_info();
 	if(!system_info_ret)
 	{
-		//printf("%s\n", system_info_ret.error().message());
 		return;
 	}
 	auto system_info = system_info_ret.value();
 
-	builder.request_validation_layers(true)
+	builder.request_validation_layers(areValidationLayersEnabled())
 		.use_default_debug_messenger();
 
 	VkDebugUtilsMessengerCreateInfoEXT debug_utils_create_info = { VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT };
@@ -245,16 +262,12 @@ void VulkanEngine::init_vulkan()
 	debug_utils_create_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
 	debug_utils_create_info.pfnUserCallback = debug_utils_messenger_callback;
 
-	if(system_info.is_extension_available(VK_EXT_DEBUG_UTILS_EXTENSION_NAME))
+	if(system_info.is_extension_available(VK_EXT_DEBUG_UTILS_EXTENSION_NAME) && areValidationLayersEnabled())
 	{
 		builder.enable_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	}
-	else
-	{
-		assert(false);
-	}
 
-	if(system_info.validation_layers_available)
+	if(system_info.validation_layers_available && areValidationLayersEnabled())
 	{
 		builder.enable_validation_layers();
 	}
@@ -372,14 +385,28 @@ void VulkanEngine::init_commands()
 	VkCommandPoolCreateInfo commandPoolInfo = vkinit::command_pool_create_info(_graphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 
 	for (int i = 0; i < FRAME_OVERLAP; i++) {
+		_frames[i].commandPools.resize(worldThreads);
 
+		for(auto& pool : _frames[i].commandPools)
+		{
+			VK_CHECK(vkCreateCommandPool(_device, &commandPoolInfo, nullptr, &pool));
+		}
 
 		VK_CHECK(vkCreateCommandPool(_device, &commandPoolInfo, nullptr, &_frames[i]._commandPool));
 
 		//allocate the default command buffer that we will use for rendering
-		VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(_frames[i]._commandPool, 1);
+		VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(_frames[i]._commandPool, 1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
 
 		VK_CHECK(vkAllocateCommandBuffers(_device, &cmdAllocInfo, &_frames[i]._mainCommandBuffer));
+
+		_frames[i].commandBuffers.resize(worldThreads);
+
+		for(int thread_id = 0; thread_id < _frames[i].commandPools.size(); thread_id++)
+		{
+			VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(_frames[i].commandPools[thread_id], 1, VK_COMMAND_BUFFER_LEVEL_SECONDARY);
+
+			VK_CHECK(vkAllocateCommandBuffers(_device, &cmdAllocInfo, &_frames[i].commandBuffers[thread_id]));
+		}
 
 		_mainDeletionQueue.push_function([=]() {
 			vkDestroyCommandPool(_device, _frames[i]._commandPool, nullptr);
@@ -846,9 +873,12 @@ void VulkanEngine::draw(flecs::world& world)
 	ZoneScoped;
 	ImGui::Render();
 
-	//wait until the GPU has finished rendering the last frame. Timeout of 1 second
-	VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
-	VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._renderFence));
+	{
+		ZoneScopedN("FENCE");
+		//wait until the GPU has finished rendering the last frame. Timeout of 1 second
+		VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
+		VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._renderFence));
+	}
 
 	//request image from the swapchain, one second timeout
 	uint32_t swapchainImageIndex;
@@ -856,6 +886,24 @@ void VulkanEngine::draw(flecs::world& world)
 
 	//now that we are sure that the commands finished executing, we can safely reset the command buffer to begin recording again.
 	VK_CHECK(vkResetCommandBuffer(get_current_frame()._mainCommandBuffer, 0));
+
+	for(int i = 0; i < get_current_frame().commandBuffers.size(); i++)
+	{
+		VkCommandBuffer callCmdBuf = get_current_frame().commandBuffers[i];
+		VK_CHECK(vkResetCommandBuffer(callCmdBuf, 0));
+
+		VkCommandBufferInheritanceInfo inheritanceInfo = vkinit::command_buffer_inheritance_info(_renderPass);
+
+		//begin the command buffer recording.
+		VkCommandBufferBeginInfo cmdBeginInfo = {};
+		cmdBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		cmdBeginInfo.pNext = nullptr;
+
+		cmdBeginInfo.pInheritanceInfo = &inheritanceInfo;
+		cmdBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT | VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
+
+		VK_CHECK(vkBeginCommandBuffer(callCmdBuf, &cmdBeginInfo));
+	}
 
 	//naming it cmd for shorter writing
 	VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
@@ -869,6 +917,8 @@ void VulkanEngine::draw(flecs::world& world)
 	cmdBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
 	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
+
+	TracyVkCollect(_tracyContext, cmd);
 
 	//make a clear-color from frame number. This will flash with a 120*pi frame period.
 	VkClearValue clearValue;
@@ -887,11 +937,11 @@ void VulkanEngine::draw(flecs::world& world)
 	VkClearValue clearValues[] = { clearValue, depthClear };
 	rpInfo.pClearValues = &clearValues[0];
 
-	vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+	vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 
 	draw_objects(cmd, _renderables.data(), _renderables.size(), world);
 
-	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+	//ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
 
 	//finalize the render pass
 	vkCmdEndRenderPass(cmd);
@@ -922,7 +972,10 @@ void VulkanEngine::draw(flecs::world& world)
 
 	//submit command buffer to the queue and execute it.
 	// _renderFence will now block until the graphic commands finish execution
-	VK_CHECK(vkQueueSubmit(_graphicsQueue, 1, &submit, get_current_frame()._renderFence));
+	{
+		ZoneScopedN("SUBMIT");
+		VK_CHECK(vkQueueSubmit(_graphicsQueue, 1, &submit, get_current_frame()._renderFence));
+	}
 
 	// this will put the image we just rendered into the visible window.
 	// we want to wait on the _renderSemaphore for that, 
@@ -938,8 +991,10 @@ void VulkanEngine::draw(flecs::world& world)
 	presentInfo.waitSemaphoreCount = 1;
 
 	presentInfo.pImageIndices = &swapchainImageIndex;
-
-	VK_CHECK(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
+	{
+		ZoneScopedN("PRESENT");
+		VK_CHECK(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
+	}
 
 	//increase the number of frames drawn
 	_frameNumber++;
@@ -1066,6 +1121,8 @@ Mesh* VulkanEngine::get_mesh(const std::string& name)
 void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int count, flecs::world& world)
 {
 	ZoneScoped;
+	tf::Taskflow drawFlow;
+
 	void* objectData;
 	vmaMapMemory(_allocator, get_current_frame().objectBuffer._allocation, &objectData);
 
@@ -1128,42 +1185,108 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 
 	static auto renderables_query = world.query<const MeshComponent, const Transform>();
 
-	renderables_query.each([&](flecs::entity e, const MeshComponent &mesh, const Transform &transform){
-		ZoneScopedN("single render");
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh._material->pipeline);
+	tf::Taskflow taskflow;
+	tf::Taskflow finishRender;
 
-		//camera data descriptor
-		uint32_t uniform_offset = pad_uniform_buffer_size(sizeof(GPUSceneData)) * frameIndex;
-		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh._material->pipelineLayout, 0, 1, &get_current_frame().globalDescriptor, 1, &uniform_offset);
+	auto finishRenderTask = finishRender.emplace([]() {});
 
-		//object data descriptor
-		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh._material->pipelineLayout, 1, 1, &get_current_frame().objectDescriptor, 0, nullptr);
+	auto materialCompare = [](
+		flecs::entity_t e1,
+		const MeshComponent* p1,
+		flecs::entity_t e2,
+		const MeshComponent* p2)
+	{
+		(void) e1;
+		(void) e2;
+		return (&p1->_material > &p2->_material) ? 1 : -1;
+	};
 
-		if(mesh._material->albedo->textureSet != VK_NULL_HANDLE)
+	renderables_query.order_by<MeshComponent>(materialCompare);
+
+	/*renderables_query.group_by<MeshComponent>([](
+		flecs::entity_t e1,
+		const MeshComponent* p1,
+		flecs::entity_t e2,
+		const MeshComponent* p2)
 		{
-			//texture descriptor
-			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh._material->pipelineLayout, 2, 1, &mesh._material->albedo->textureSet, 0, nullptr);
-		}
-		
+			
+		});*/
 
-		glm::mat4 model = transform.transform;
-		//final render matrix, that we are calculating on the cpu
-		glm::mat4 mesh_matrix = projection * view * model;
+	renderables_query.iter([&](flecs::iter& it, const MeshComponent* mesh, const Transform* transform)
+		{
+			auto start = 0;
+			auto end = 0;
+			Material* currentMat = mesh[0]._material;
+			for (auto i = 0; i < it.count(); ++i)
+			{
+				if(i != *it.end())
+				{
+					if(currentMat != mesh[i + 1]._material)
+					{
+						currentMat = mesh[i + 1]._material;
+						auto current = i;
+						end = current;
+						const auto* currentFrame = &get_current_frame();
+						auto& executor = this->executor;
+						auto& tracyContext = this->_tracyContext;
+						taskflow.emplace([=, &executor]()
+							{
+								ZoneScopedN("single material render");
 
-		MeshPushConstants constants = {};
-		constants.render_matrix = transform.transform;
+								VkCommandBuffer callCmdBuf = get_current_frame().commandBuffers[executor.this_worker_id()];
 
-		//upload the mesh to the GPU via pushconstants
-		vkCmdPushConstants(cmd, mesh._material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
+								TracyVkZone(_tracyContext, callCmdBuf, "Material render");
 
-		//bind the mesh vertex buffer with offset 0
-		VkDeviceSize offset = 0;
-		vkCmdBindVertexBuffers(cmd, 0, 1, &mesh._mesh->_vertexBuffer._buffer, &offset);
+								vkCmdBindPipeline(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipeline);
 
-		//we can now draw
-		vkCmdDraw(cmd, mesh._mesh->_vertices.size(), 1, 0, 0);
-	});
+								//camera data descriptor
+								uint32_t uniform_offset = pad_uniform_buffer_size(sizeof(GPUSceneData)) * frameIndex;
+								vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 0, 1, &currentFrame->globalDescriptor, 1, &uniform_offset);
 
+								//object data descriptor
+								vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 1, 1, &currentFrame->objectDescriptor, 0, nullptr);
+
+								vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 2, 1, &mesh[start]._material->albedo->textureSet, 0, nullptr);
+
+								for(auto it = start; it < end; it++)
+								{
+									glm::mat4 model = transform[it].transform;
+									//final render matrix, that we are calculating on the cpu
+									glm::mat4 mesh_matrix = projection * view * model;
+
+									MeshPushConstants constants = {};
+									constants.render_matrix = transform[it].transform;
+
+									//upload the mesh to the GPU via pushconstants
+									vkCmdPushConstants(callCmdBuf, mesh[it]._material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
+
+									//bind the mesh vertex buffer with offset 0
+									VkDeviceSize offset = 0;
+									vkCmdBindVertexBuffers(callCmdBuf, 0, 1, &mesh[it]._mesh->_vertexBuffer._buffer, &offset);
+
+									//we can now draw
+									vkCmdDraw(callCmdBuf, mesh[it]._mesh->_vertices.size(), 1, 0, 0);
+								}
+							});
+						start = end;
+					}
+				}
+			}
+		});
+
+	executor.run(taskflow);
+	executor.run(finishRender);
+
+	executor.wait_for_all();
+
+	for(int i = 0; i < get_current_frame().commandBuffers.size(); i++)
+	{
+		VkCommandBuffer callCmdBuf = get_current_frame().commandBuffers[i];
+
+		VK_CHECK(vkEndCommandBuffer(callCmdBuf));
+	}
+
+	vkCmdExecuteCommands(cmd, get_current_frame().commandBuffers.size(), get_current_frame().commandBuffers.data());
 }
 
 void VulkanEngine::init_scene(flecs::world& world)

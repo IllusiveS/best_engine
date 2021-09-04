@@ -41,6 +41,16 @@ VkCommandBufferBeginInfo vkinit::command_buffer_begin_info(VkCommandBufferUsageF
 	return info;
 }
 
+VkCommandBufferInheritanceInfo vkinit::command_buffer_inheritance_info(VkRenderPass renderPass)
+{
+	VkCommandBufferInheritanceInfo info = {};
+	info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+	info.renderPass = renderPass;
+	info.framebuffer = VK_NULL_HANDLE;
+
+	return info;
+}
+
 VkSubmitInfo vkinit::submit_info(VkCommandBuffer* cmd)
 {
 	VkSubmitInfo info = {};
@@ -394,13 +404,14 @@ bool vkinit::load_image_from_file(VulkanEngine& engine, const char* file, Alloca
 
 		});
 	
+	auto allocator = engine._allocator;
 	engine._mainDeletionQueue.push_function([=]()
 		{
 
-			vmaDestroyImage(engine._allocator, newImage._image, newImage._allocation);
+			vmaDestroyImage(allocator, newImage._image, newImage._allocation);
 		});
 
-	vmaDestroyBuffer(engine._allocator, stagingBuffer._buffer, stagingBuffer._allocation);
+	vmaDestroyBuffer(allocator, stagingBuffer._buffer, stagingBuffer._allocation);
 
 	std::cout << "Texture loaded successfully " << file << std::endl;
 

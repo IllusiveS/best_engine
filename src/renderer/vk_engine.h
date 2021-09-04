@@ -13,6 +13,7 @@
 #include <functional>
 #include <deque>
 #include <unordered_map>
+#include <thread>
 
 #include "vk_mesh.h"
 
@@ -20,8 +21,11 @@
 #include <glm/gtx/transform.hpp>
 #include <entt.hpp>
 
+#include "taskflow.hpp"
+
 #include <flecs.h>
 
+#include <TracyVulkan.hpp>
 
 
 constexpr unsigned int FRAME_OVERLAP = 2;
@@ -51,12 +55,18 @@ struct FrameData {
 	VkCommandPool _commandPool;
 	VkCommandBuffer _mainCommandBuffer;
 
+	VkCommandBuffer _tracyBuffer;
+
 	AllocatedBuffer objectBuffer;
 	VkDescriptorSet objectDescriptor;
 
 	AllocatedBuffer cameraBuffer;
 
 	VkDescriptorSet globalDescriptor;
+
+	std::map<std::thread::id, int> threads;
+	std::vector< VkCommandPool > commandPools;
+	std::vector< VkCommandBuffer > commandBuffers;
 };
 
 
@@ -128,6 +138,8 @@ public:
 
 class VulkanEngine {
 public:
+	VulkanEngine();
+
 	static PFN_vkSetDebugUtilsObjectNameEXT setObjectDebugName;
 
 	UploadContext _uploadContext;
@@ -228,6 +240,8 @@ public:
 	GPUSceneData _sceneParameters;
 	AllocatedBuffer _sceneParameterBuffer;
 
+	//tf::Executor executor{ 2 };
+	//tf::Taskflow taskflow;
 
 	//functions
 	//create material and add it to the map
@@ -248,6 +262,15 @@ public:
 
 	int _selectedShader{ 0 };
 
+#if defined(NDEBUG)
+	const bool debug = false;
+#else
+	const bool debug = true;
+#endif
+
+	constexpr bool isProfilingEnabled() { return debug; };
+	constexpr bool areValidationLayersEnabled() { return debug; };
+
 private:
 	void init_vulkan();
 	void init_swapchain(); 
@@ -256,6 +279,7 @@ private:
 	void init_framebuffers();
 	void init_sync_structures();
 	void init_pipelines();
+	void init_tracy();
 
 	void init_textured_pipeline();
 	void init_debug_pipeline();
@@ -267,7 +291,12 @@ private:
 
 	void upload_mesh(Mesh& mesh);
 
+	tracy::VkCtx* _tracyContext;
+
 	size_t pad_uniform_buffer_size(size_t originalSize);
+	
+	int worldThreads{ 3 };
+	tf::Executor executor;
 };
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debug_utils_messenger_callback(

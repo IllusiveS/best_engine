@@ -14,6 +14,7 @@ namespace vkinit {
 	VkCommandBufferAllocateInfo command_buffer_allocate_info(VkCommandPool pool, uint32_t count = 1, VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
 
 	VkCommandBufferBeginInfo command_buffer_begin_info(VkCommandBufferUsageFlags flags = 0);
+	VkCommandBufferInheritanceInfo command_buffer_inheritance_info(VkRenderPass renderPass);
 
 	VkSubmitInfo submit_info(VkCommandBuffer* cmd);
 
