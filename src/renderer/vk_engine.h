@@ -56,6 +56,7 @@ struct FrameData {
 	VkCommandBuffer _mainCommandBuffer;
 
 	VkCommandBuffer _tracyBuffer;
+	tracy::VkCtx* _tracyContext;
 
 	AllocatedBuffer objectBuffer;
 	VkDescriptorSet objectDescriptor;
@@ -292,8 +293,6 @@ private:
 	void init_scene(flecs::world& world);
 
 	void upload_mesh(Mesh& mesh);
-
-	tracy::VkCtx* _tracyContext;
 
 	size_t pad_uniform_buffer_size(size_t originalSize);
 	

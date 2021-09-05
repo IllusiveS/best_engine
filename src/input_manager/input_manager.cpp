@@ -72,8 +72,6 @@ void InputManager::processAllKeys()
 			mouseVertical = -e.motion.yrel;
 		}
 
-		std::cout << std::to_string(mouseHorizontal) << std::endl;
-
 		if(e.type == SDL_MOUSEBUTTONDOWN)
 		{
 

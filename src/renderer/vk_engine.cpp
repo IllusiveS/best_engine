@@ -147,14 +147,21 @@ void VulkanEngine::init(flecs::world &world)
 
 void VulkanEngine::init_tracy()
 {
-	VkCommandBuffer tracyBuffer;
+	for(int i = 0; i < FRAME_OVERLAP; ++i)
+	{
+		FrameData& currentFrame = _frames[i];
 
-	VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(_frames[0]._commandPool, 1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+		VkCommandBuffer tracyBuffer = currentFrame._tracyBuffer;
 
-	VK_CHECK(vkAllocateCommandBuffers(_device, &cmdAllocInfo, &tracyBuffer));
+		VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(_frames[0]._commandPool, 1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
 
-	_tracyContext = TracyVkContext(_chosenGPU,
-		_device, _graphicsQueue, tracyBuffer);
+		VK_CHECK(vkAllocateCommandBuffers(_device, &cmdAllocInfo, &tracyBuffer));
+
+		currentFrame._tracyContext = TracyVkContext(_chosenGPU,
+			_device, _graphicsQueue, tracyBuffer);
+	}
+
+	
 }
 
 void VulkanEngine::init_imgui()
@@ -920,7 +927,7 @@ void VulkanEngine::draw(flecs::world& world)
 
 	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
-	TracyVkCollect(_tracyContext, cmd);
+	TracyVkCollect(get_current_frame()._tracyContext, cmd);
 
 	//make a clear-color from frame number. This will flash with a 120*pi frame period.
 	VkClearValue clearValue;
@@ -1086,7 +1093,7 @@ void VulkanEngine::camera_system(flecs::world& world)
 
 	static auto q = world.query<const Camera, Transform>();
 
-	const float camera_speed = 15.0f;
+	const float camera_speed = 1.0f;
 
 	q.each([&](const Camera& cam, Transform& transform)
 		{
@@ -1118,14 +1125,11 @@ void VulkanEngine::camera_system(flecs::world& world)
 				transform.transform = glm::translate(transform.transform, forwardVec);
 			}
 
-			auto horMouse = inputManager->getHorizontalMouse();
-			auto verMouse = inputManager->getVerticalMouse();
+			const auto horMouse = inputManager->getHorizontalMouse();
+			const auto verMouse = inputManager->getVerticalMouse();
 
-			auto directionMatrix = transform.transform;
-			directionMatrix[3] = glm::vec4();
-
-			auto upVec = normalize(glm::vec3({0.0f, 1.0f, 0.0f}));
-			auto rightVec = normalize(glm::vec3(translationMatrix[2]));
+			const auto upVec = normalize(glm::vec3({0.0f, 1.0f, 0.0f}));
+			const auto rightVec = normalize(glm::vec3(translationMatrix[2]));
 
 			if(horMouse != 0.0)
 			{
@@ -1134,7 +1138,7 @@ void VulkanEngine::camera_system(flecs::world& world)
 
 			if(verMouse != 0.0)
 			{
-				transform.transform = glm::rotate(transform.transform, verMouse, rightVec);
+				//transform.transform = glm::rotate(transform.transform, verMouse, rightVec);
 			}
 		});
 }
@@ -1204,7 +1208,7 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 		{
 		const glm::mat4 inverted = glm::inverse(transform.transform);
 		const glm::vec3 pos = normalize(glm::vec3(inverted[2]));
-		view = glm::lookAt(glm::vec3{ transform.transform[3] }, glm::vec3{ transform.transform[0] } + glm::vec3{ transform.transform[3] }, glm::vec3{ 0.0f, 1.0f, 0.0f });
+		view = glm::lookAt(glm::vec3{ transform.transform[3] }, normalize(glm::vec3{ transform.transform[0] }) + glm::vec3{ transform.transform[3] }, glm::vec3{ 0.0f, 1.0f, 0.0f });
 	});
 
 	//camera view
@@ -1287,14 +1291,14 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 						end = current;
 						const auto* currentFrame = &get_current_frame();
 						auto& executor = this->executor;
-						auto& tracyContext = this->_tracyContext;
 						taskflow.emplace([=, &executor]()
 							{
 								ZoneScopedN("single material render");
 
 								VkCommandBuffer callCmdBuf = get_current_frame().commandBuffers[executor.this_worker_id()];
 
-								TracyVkZone(_tracyContext, callCmdBuf, "Material render");
+								//TODO fix vulkan profiling
+								//TracyVkZone(currentFrame->_tracyContext, callCmdBuf, "Material render");
 
 								vkCmdBindPipeline(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipeline);
 
