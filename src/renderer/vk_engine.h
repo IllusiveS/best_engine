@@ -164,6 +164,8 @@ public:
 	//run main loop
 	void run(flecs::world& world);
 
+	void camera_system(flecs::world& world);
+
 	bool load_shader_module(const char* filePath, VkShaderModule* outShaderModule);
 
 	VkInstance _instance; // Vulkan library handle

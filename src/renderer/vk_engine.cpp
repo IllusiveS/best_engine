@@ -29,6 +29,8 @@
 #include "backends/imgui_impl_sdl.h"
 #include "backends/imgui_impl_vulkan.h"
 
+#include "input_manager/input_manager.h"
+
 PFN_vkSetDebugUtilsObjectNameEXT VulkanEngine::setObjectDebugName = nullptr;
 
 VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass) {
@@ -1058,15 +1060,7 @@ void VulkanEngine::run(flecs::world& world)
 	while (!bQuit)
 	{
 		FrameMark;
-		//Handle events on queue
-		while (SDL_PollEvent(&e) != 0)
-		{
-			ImGui_ImplSDL2_ProcessEvent(&e);
-			//close the window when user clicks the X button or alt-f4s
-			if (e.type == SDL_QUIT) {
-				bQuit = true;
-			}
-		}
+		world.get_mut<InputManager>()->processAllKeys();
 
 		ImGui_ImplVulkan_NewFrame();
 		ImGui_ImplSDL2_NewFrame(_window);
@@ -1077,8 +1071,56 @@ void VulkanEngine::run(flecs::world& world)
 		//imgui commands
 		ImGui::ShowDemoWindow();
 
+		camera_system(world);
+
 		draw(world);
 	}
+}
+
+#include <glm/gtc/matrix_transform.hpp>
+#include "glm/gtx/string_cast.hpp"
+
+void VulkanEngine::camera_system(flecs::world& world)
+{
+	auto* inputManager = world.get<InputManager>();
+
+	static auto q = world.query<const Camera, Transform>();
+
+	const float camera_speed = 15.0f;
+
+	q.each([&](const Camera& cam, Transform& transform)
+		{
+			const glm::mat4 translationMatrix = transform.transform;
+			const glm::vec3 forward = normalize(glm::vec3(translationMatrix[0]));
+			const glm::vec3 right = normalize(glm::vec3(translationMatrix[1]));
+
+			if(inputManager->isKeyPressed(SDL_SCANCODE_W))
+			{
+				const glm::vec3 forwardVec = forward * camera_speed;
+				transform.transform = glm::translate(transform.transform, forwardVec);
+			}
+
+			if(inputManager->isKeyPressed(SDL_SCANCODE_S))
+			{
+				const glm::vec3 forwardVec = -forward * camera_speed;
+				transform.transform = glm::translate(transform.transform, forwardVec);
+			}
+
+			if(inputManager->isKeyPressed(SDL_SCANCODE_D))
+			{
+				const glm::vec3 forwardVec = right * camera_speed;
+				transform.transform = glm::translate(transform.transform, forwardVec);
+			}
+
+			if(inputManager->isKeyPressed(SDL_SCANCODE_A))
+			{
+				const glm::vec3 forwardVec = -right * camera_speed;
+				transform.transform = glm::translate(transform.transform, forwardVec);
+			}
+			auto str = glm::to_string(transform.transform[3]);
+			std::cout << str << std::endl;
+		
+		});
 }
 
 Material* VulkanEngine::create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string& name)
@@ -1148,7 +1190,6 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 	});
 
 	//camera view
-	camPos = { 0.f,-6.f,-10.f };
 	glm::mat4 view = glm::translate(glm::mat4(1.f), camPos);
 	//camera projection
 	glm::mat4 projection = glm::perspective(glm::radians(70.f), 1700.f / 900.f, 0.1f, 200.0f);
