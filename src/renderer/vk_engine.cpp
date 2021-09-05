@@ -1136,11 +1136,6 @@ void VulkanEngine::camera_system(flecs::world& world)
 			{
 				transform.transform = glm::rotate(transform.transform, verMouse, rightVec);
 			}
-
-			std::cout << glm::to_string(forward) << std::endl;
-			//directionMatrix = glm::rotate(directionMatrix, verMouse, rightVec);
-
-			//transform.transform = glm::translate(directionMatrix, glm::vec3{ transform.transform[3] });
 		});
 }
 

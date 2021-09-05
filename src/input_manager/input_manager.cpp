@@ -26,6 +26,9 @@ void InputManager::processAllKeys()
 {
 	SDL_Event e;
 
+	mouseHorizontal = 0;
+	mouseVertical = 0;
+
 	//Handle events on queue
 	while(SDL_PollEvent(&e) != 0)
 	{
@@ -68,6 +71,8 @@ void InputManager::processAllKeys()
 			mouseHorizontal = -e.motion.xrel;
 			mouseVertical = -e.motion.yrel;
 		}
+
+		std::cout << std::to_string(mouseHorizontal) << std::endl;
 
 		if(e.type == SDL_MOUSEBUTTONDOWN)
 		{
