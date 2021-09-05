@@ -13,10 +13,16 @@ class InputManager
 	bool onClick[SDL_NUM_SCANCODES];
 	bool onRelease[SDL_NUM_SCANCODES];
 
+	int mouseHorizontal;
+	int mouseVertical;
+
 public:
 	InputManager();
 
 	void processAllKeys();
 
 	bool isKeyPressed(SDL_Scancode code) const;
+
+	float getHorizontalMouse() const;
+	float getVerticalMouse() const;
 };

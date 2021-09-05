@@ -1092,7 +1092,7 @@ void VulkanEngine::camera_system(flecs::world& world)
 		{
 			const glm::mat4 translationMatrix = transform.transform;
 			const glm::vec3 forward = normalize(glm::vec3(translationMatrix[0]));
-			const glm::vec3 right = normalize(glm::vec3(translationMatrix[1]));
+			const glm::vec3 right = normalize(glm::vec3(translationMatrix[2]));
 
 			if(inputManager->isKeyPressed(SDL_SCANCODE_W))
 			{
@@ -1117,9 +1117,30 @@ void VulkanEngine::camera_system(flecs::world& world)
 				const glm::vec3 forwardVec = -right * camera_speed;
 				transform.transform = glm::translate(transform.transform, forwardVec);
 			}
-			auto str = glm::to_string(transform.transform[3]);
-			std::cout << str << std::endl;
-		
+
+			auto horMouse = inputManager->getHorizontalMouse();
+			auto verMouse = inputManager->getVerticalMouse();
+
+			auto directionMatrix = transform.transform;
+			directionMatrix[3] = glm::vec4();
+
+			auto upVec = normalize(glm::vec3({0.0f, 1.0f, 0.0f}));
+			auto rightVec = normalize(glm::vec3(translationMatrix[2]));
+
+			if(horMouse != 0.0)
+			{
+				transform.transform = glm::rotate(transform.transform, horMouse, upVec);
+			}
+
+			if(verMouse != 0.0)
+			{
+				transform.transform = glm::rotate(transform.transform, verMouse, rightVec);
+			}
+
+			std::cout << glm::to_string(forward) << std::endl;
+			//directionMatrix = glm::rotate(directionMatrix, verMouse, rightVec);
+
+			//transform.transform = glm::translate(directionMatrix, glm::vec3{ transform.transform[3] });
 		});
 }
 
@@ -1182,15 +1203,17 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 
 	static auto q = world.query<const Camera, const Transform>();
 
+	glm::mat4 view;
+
 	q.each([&](const Camera& cam, const Transform& transform)
 		{
 		const glm::mat4 inverted = glm::inverse(transform.transform);
-		const glm::vec3 forward = normalize(glm::vec3(inverted[3]));
-		camPos = forward;
+		const glm::vec3 pos = normalize(glm::vec3(inverted[2]));
+		view = glm::lookAt(glm::vec3{ transform.transform[3] }, glm::vec3{ transform.transform[0] } + glm::vec3{ transform.transform[3] }, glm::vec3{ 0.0f, 1.0f, 0.0f });
 	});
 
 	//camera view
-	glm::mat4 view = glm::translate(glm::mat4(1.f), camPos);
+	//view = glm::translate(glm::mat4(1.f), camPos);
 	//camera projection
 	glm::mat4 projection = glm::perspective(glm::radians(70.f), 1700.f / 900.f, 0.1f, 200.0f);
 	projection[1][1] *= -1;
@@ -1347,7 +1370,7 @@ void VulkanEngine::init_scene(flecs::world& world)
 			RenderObject tri = {};
 			tri.mesh = get_mesh("cube");
 			tri.material = get_material("green_voxel");
-			glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(x, 0, y));
+			glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(x, -1.0f, y));
 			glm::mat4 scale = glm::scale(glm::mat4{ 1.0 }, glm::vec3(0.5, 0.5, 0.5));
 			auto trans = translation * scale;
 
@@ -1356,12 +1379,12 @@ void VulkanEngine::init_scene(flecs::world& world)
 			ent.set<MeshComponent>({tri.mesh, tri.material});
 			ent.set<Transform>({ trans });
 		}
-		for(int y = 0; y <= 20; y++)
+		for(int y = 1; y <= 20; y++)
 		{
 			RenderObject tri = {};
 			tri.mesh = get_mesh("cube");
 			tri.material = get_material("black_voxel");
-			glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(x, 0, y));
+			glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(x, -1.0f, y));
 			glm::mat4 scale = glm::scale(glm::mat4{ 1.0 }, glm::vec3(0.5, 0.5, 0.5));
 			auto trans = translation * scale;
 

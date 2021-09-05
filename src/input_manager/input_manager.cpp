@@ -4,8 +4,14 @@
 
 #include "backends/imgui_impl_sdl.h"
 
+#include <iostream>
+#include <string>
+
 InputManager::InputManager()
+	:mouseHorizontal(0), mouseVertical(0)
 {
+	SDL_SetRelativeMouseMode(SDL_TRUE);
+
 	for(auto key = 0; key < SDL_NUM_SCANCODES; key++)
 	{
 		onClick[key] = false;
@@ -56,11 +62,37 @@ void InputManager::processAllKeys()
 				onRelease[code] = true;
 			}
 		}
+
+		if(e.type == SDL_MOUSEMOTION)
+		{
+			mouseHorizontal = -e.motion.xrel;
+			mouseVertical = -e.motion.yrel;
+		}
+
+		if(e.type == SDL_MOUSEBUTTONDOWN)
+		{
+
+		}
 		
+		if(e.type == SDL_MOUSEBUTTONUP)
+		{
+
+		}
+
 	}
 }
 
 bool InputManager::isKeyPressed(const SDL_Scancode code) const 
 {
 	return isPressed[code];
+}
+
+float InputManager::getHorizontalMouse() const
+{
+	return 0.001f * mouseHorizontal;
+}
+
+float InputManager::getVerticalMouse() const
+{
+	return 0.001f * mouseVertical;
 }
