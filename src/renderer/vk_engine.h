@@ -165,6 +165,8 @@ public:
 	//run main loop
 	void run(flecs::world& world);
 
+	void system_update_global_transforms(flecs::world& world);
+	void system_update_model_matrixes(flecs::world& world);
 	void camera_system(flecs::world& world);
 
 	bool load_shader_module(const char* filePath, VkShaderModule* outShaderModule);
@@ -296,7 +298,7 @@ private:
 
 	size_t pad_uniform_buffer_size(size_t originalSize);
 	
-	int worldThreads{ 3 };
+	int worldThreads{ 8 };
 	tf::Executor executor;
 };
 

@@ -8,10 +8,8 @@
 #include <string>
 
 InputManager::InputManager()
-	:mouseHorizontal(0), mouseVertical(0)
+	:mouseHorizontal(0), mouseVertical(0), quit(false)
 {
-	SDL_SetRelativeMouseMode(SDL_TRUE);
-
 	for(auto key = 0; key < SDL_NUM_SCANCODES; key++)
 	{
 		onClick[key] = false;
@@ -52,6 +50,11 @@ void InputManager::processAllKeys()
 			{
 				onClick[code] = true;
 			}
+
+			if(code == SDL_SCANCODE_ESCAPE)
+			{
+				quit = true;
+			}
 		}
 		else if(e.type == SDL_KEYUP)
 		{
@@ -64,6 +67,11 @@ void InputManager::processAllKeys()
 			{
 				onRelease[code] = true;
 			}
+		}
+
+		if(e.type == SDL_QUIT)
+		{
+			quit = true;
 		}
 
 		if(e.type == SDL_MOUSEMOTION)
@@ -92,10 +100,10 @@ bool InputManager::isKeyPressed(const SDL_Scancode code) const
 
 float InputManager::getHorizontalMouse() const
 {
-	return 0.001f * mouseHorizontal;
+	return 0.01f * mouseHorizontal;
 }
 
 float InputManager::getVerticalMouse() const
 {
-	return 0.001f * mouseVertical;
+	return 0.01f * mouseVertical;
 }

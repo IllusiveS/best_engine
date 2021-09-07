@@ -19,3 +19,21 @@ void Vector3::bind_methods(wrenpp::VM& vm) {
         .endClass()
     .endModule();
 }
+
+Transform::Transform(glm::vec3 pos,
+	glm::quat rot,
+	glm::vec3 sca)
+	:position(pos), rotation(rot), scale(sca)
+	, globalPosition(glm::vec3{}), globalScale{ glm::vec3{1.0f, 1.0f, 1.0f} }, globalRotation{ glm::quat(1.0, 0.0, 0.0, 0.0) }
+{
+
+}
+
+void Transform::updateModelMatrix()
+{
+	const glm::mat4 translationMatrix = glm::translate(glm::mat4(1.0), globalPosition);
+	const glm::mat4 rotationMatrix = glm::toMat4(globalRotation);
+	const glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0), globalScale);
+
+	transform = translationMatrix * rotationMatrix;
+}

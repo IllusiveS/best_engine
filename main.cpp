@@ -18,7 +18,7 @@ int main() {
 	flecs::world ecs(0, 0);
 
 	auto camEntity = ecs.entity("Camera");
-	camEntity.set<Transform>({ glm::translate(glm::mat4(1.f), glm::vec3{ 0.f,-6.f,-10.f }) });
+	camEntity.set<Transform>({ glm::vec3{ 0.f,-6.f,-10.f } });
 	camEntity.add<Camera>();
 
 	InputManager inputManager;

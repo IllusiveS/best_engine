@@ -6,6 +6,8 @@
 #define BEST_ENGINE_TRANSFORM_H
 
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/quaternion.hpp>
 
 #include <Wrenpp.h>
 
@@ -26,9 +28,27 @@ struct Vector3 {
 };
 
 struct Transform{
+	glm::vec3 globalPosition;
+	glm::quat globalRotation;
+	glm::vec3 globalScale;
+
+	glm::vec3 position;
+	glm::quat rotation;
+	glm::vec3 scale;
+
+	Transform(glm::vec3 position = glm::vec3{},
+		glm::quat rotation = glm::quat(1.0, 0.0, 0.0, 0.0),
+		glm::vec3 scale = glm::vec3{ 1 });
+
+	glm::mat4 getModelMatrix() const
+	{
+		return transform;
+	}
+
+	void updateModelMatrix();
+
+private:
 	glm::mat4 transform;
-
-
 };
 
 

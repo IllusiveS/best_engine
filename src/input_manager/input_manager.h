@@ -16,6 +16,8 @@ class InputManager
 	int mouseHorizontal;
 	int mouseVertical;
 
+	bool quit;
+
 public:
 	InputManager();
 
@@ -25,4 +27,9 @@ public:
 
 	float getHorizontalMouse() const;
 	float getVerticalMouse() const;
+
+	bool wasQuitRequested() const
+	{
+		return quit;
+	};
 };
