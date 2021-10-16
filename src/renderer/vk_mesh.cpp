@@ -4,18 +4,10 @@
 
 #include "vk_mesh.h"
 
-#include <tiny_obj_loader.h>
 #include <iostream>
 
-bool Mesh::load_from_obj(const char* filename)
+bool Mesh::load_from_file(const char* filename)
 {
-	//attrib will contain the vertex arrays of the file
-	tinyobj::attrib_t attrib;
-	//shapes contains the info for each separate object in the file
-	std::vector<tinyobj::shape_t> shapes;
-	//materials contains the information about the material of each shape, but we won't use it.
-	std::vector<tinyobj::material_t> materials;
-
 	//error and warning output from the load function
 	std::string warn;
 	std::string err;
@@ -23,16 +15,21 @@ bool Mesh::load_from_obj(const char* filename)
 	//load the OBJ file
 	tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename, nullptr);
 	//make sure to output the warnings to the console, in case there are issues with the file
-	if (!warn.empty()) {
+	if(!warn.empty())
+	{
 		std::cout << "WARN: " << warn << std::endl;
 	}
 	//if we have any error, print it to the console, and break the mesh loading.
 	//This happens if the file can't be found or is malformed
-	if (!err.empty()) {
+	if(!err.empty())
+	{
 		std::cerr << err << std::endl;
 		return false;
 	}
+}
 
+bool Mesh::parse_data()
+{
 	// Loop over shapes
 	for (size_t s = 0; s < shapes.size(); s++) {
 		// Loop over faces(polygon)

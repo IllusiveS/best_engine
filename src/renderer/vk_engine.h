@@ -292,6 +292,8 @@ private:
 	void init_imgui();
 
 	void load_meshes();
+	void load_mesh(const std::string& path, const std::string& id);
+
 	void init_scene(flecs::world& world);
 
 	void upload_mesh(Mesh& mesh);
@@ -300,6 +302,12 @@ private:
 	
 	int worldThreads{ 8 };
 	tf::Executor executor;
+
+	tf::CriticalSection criticalSectionFilesystem{ 1 };
+	tf::CriticalSection criticalSectionLongJob{ 2 };
+	tf::CriticalSection criticalSectionImmideateSubmit{ 1 };
+
+	std::vector<flecs::world> stages;
 };
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debug_utils_messenger_callback(

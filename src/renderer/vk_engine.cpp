@@ -793,24 +793,78 @@ void VulkanEngine::load_meshes()
 	_triangleMesh._vertices[1].color = { 0.f, 1.f, 0.0f }; //pure green
 	_triangleMesh._vertices[2].color = { 0.f, 1.f, 0.0f }; //pure green
 
-	_monkeyMesh.load_from_obj("assets/monkey_flat.obj");
+	load_mesh("assets/monkey_flat.obj", "monkey");
+	load_mesh("assets/monkey_flat.obj", "monkey9");
+	load_mesh("assets/monkey_flat.obj", "monkey8");
+	load_mesh("assets/monkey_flat.obj", "monkey7");
+	load_mesh("assets/monkey_flat.obj", "monkey6");
+	load_mesh("assets/monkey_flat.obj", "monkey5");
+	load_mesh("assets/monkey_flat.obj", "monkey4");
+	load_mesh("assets/monkey_flat.obj", "monkey3");
+	load_mesh("assets/monkey_flat.obj", "monkey2");
+	load_mesh("assets/lost_empire.obj", "empire");
+	load_mesh("assets/cube.obj", "cube");
+	load_mesh("assets/cube.obj", "cube2");
+	load_mesh("assets/cube.obj", "cube3");
+	load_mesh("assets/cube.obj", "cube4");
+	load_mesh("assets/cube.obj", "cube5");
+	load_mesh("assets/cube.obj", "cube7");
+	load_mesh("assets/cube.obj", "cube6");
+	load_mesh("assets/cube.obj", "cube8");
+	load_mesh("assets/cube.obj", "cube9");
+	load_mesh("assets/cube.obj", "cube0");
+	load_mesh("assets/cube.obj", "cubea");
+	load_mesh("assets/cube.obj", "cubes");
+	load_mesh("assets/cube.obj", "cubed");
+	load_mesh("assets/cube.obj", "cubef");
+	load_mesh("assets/cube.obj", "cubeg");
+	load_mesh("assets/cube.obj", "cubeh");
+	load_mesh("assets/cube.obj", "cubej");
 
-	Mesh lostEmpire{};
-	lostEmpire.load_from_obj("assets/lost_empire.obj");
+	load_mesh("assets/Man.obj", "human");
+}
 
-	Mesh cube{};
-	cube.load_from_obj("assets/cube.obj");
+void VulkanEngine::load_mesh(const std::string& path, const std::string& id)
+{
+	tf::Taskflow loadMeshTaskflow;
 
-	upload_mesh(cube);
-	upload_mesh(lostEmpire);
-	upload_mesh(_triangleMesh);
-	upload_mesh(_monkeyMesh);
+	loadMeshTaskflow.emplace([path, this, id](tf::Subflow& subflow)
+		{
+			auto meshPath = path;
 
-	//note that we are copying them. Eventually we will delete the hardcoded _monkey and _triangle meshes, so it's no problem now.
-	_meshes["monkey"] = _monkeyMesh;
-	_meshes["triangle"] = _triangleMesh;
-	_meshes["empire"] = lostEmpire;
-	_meshes["cube"] = cube;
+			Mesh newMesh{};
+
+			tf::Task readFromDrive = subflow.emplace([meshPath, &newMesh, this]()
+				{
+					ZoneScopedN("load mesh from drive");
+					newMesh.load_from_file(meshPath.c_str());
+				});
+
+			criticalSectionLongJob.add(readFromDrive);
+			criticalSectionFilesystem.add(readFromDrive);
+
+			tf::Task parseMesh = subflow.emplace([this, &newMesh]()
+				{
+					ZoneScopedN("load mesh parse");
+					newMesh.parse_data();
+				});
+			parseMesh.succeed(readFromDrive);
+			criticalSectionLongJob.add(parseMesh);
+
+			tf::Task uploadMeshTask = subflow.emplace([this, &newMesh, id]()
+				{
+					ZoneScopedN("load mesh upload");
+					upload_mesh(newMesh);
+					_meshes[id] = std::move(newMesh);
+				});
+			uploadMeshTask.succeed(parseMesh);
+			criticalSectionLongJob.add(uploadMeshTask);
+			criticalSectionImmideateSubmit.add(uploadMeshTask);
+
+			subflow.join();
+		});
+	
+	executor.run(std::move(loadMeshTaskflow));
 }
 
 void VulkanEngine::upload_mesh(Mesh& mesh)
@@ -1089,7 +1143,7 @@ void VulkanEngine::run(flecs::world& world)
 		draw(world);
 
 		//TODO enable losing and gaining mouse control
-		SDL_WarpMouseInWindow(_window, _windowExtent.width / 2, _windowExtent.height / 2);
+		//SDL_WarpMouseInWindow(_window, _windowExtent.width / 2, _windowExtent.height / 2);
 
 		if(world.get<InputManager>()->wasQuitRequested()) 
 			bQuit = true;
@@ -1140,39 +1194,48 @@ void VulkanEngine::system_update_global_transforms(flecs::world& world)
 
 void VulkanEngine::system_update_model_matrixes(flecs::world& world)
 {
-	static auto q = world.query<Transform>();
+	ZoneScoped;
+	auto q = world.query<Transform>();
 
-	tf::Taskflow taskflow;
+	tf::Taskflow mainFlow;
+	mainFlow.name("system update model matrixes");
 
-	world.staging_begin();
+	stages.clear();
 
-	std::vector<flecs::world> stages;
+	tf::Task prepareTask = mainFlow.emplace([this, &world]()
+	{
+		ZoneScopedN("update model matrixes begin");
+		world.staging_begin();
+
+
+		for(int i = 0; i < worldThreads; ++i)
+		{
+			stages.push_back(world.get_stage(i));
+		}
+	}).name("prepare for matrix task");
+
+	tf::Task finishTask = mainFlow.emplace([&world]()
+		{
+			ZoneScopedN("update model matrixes end");
+			world.staging_end();
+		}).name("cleanup matrix task");
 
 	for(int i = 0; i < worldThreads; ++i)
 	{
-		stages.push_back(world.get_stage(i));
-	}
-
-	for(int i = 0; i < worldThreads; ++i)
-	{
-		taskflow.emplace([&, i]()
+		mainFlow.emplace([q, this, i]()
 			{
+				ZoneScopedN("update model matrixes");
 				q.iter_worker(stages[i].get_stage_id(), stages[i].get_stage_count(), [](flecs::iter it, Transform* trans)
 					{
-						ZoneScopedN("update model matrixes");
 						for(auto row : it)
 						{
 							trans[row].updateModelMatrix();
 						}
 				});
-		});
+		}).succeed(prepareTask).precede(finishTask).name("single update matrix task");
 	}
-
-	executor.run(taskflow);
 	
-	executor.wait_for_all();
-
-	world.staging_end();
+	executor.run(std::move(mainFlow));
 }
 
 void VulkanEngine::camera_system(flecs::world& world)
@@ -1280,8 +1343,6 @@ Mesh* VulkanEngine::get_mesh(const std::string& name)
 void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int count, flecs::world& world)
 {
 	ZoneScoped;
-	tf::Taskflow drawFlow;
-
 	void* objectData;
 	vmaMapMemory(_allocator, get_current_frame().objectBuffer._allocation, &objectData);
 
@@ -1348,101 +1409,102 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 
 	vmaUnmapMemory(_allocator, _sceneParameterBuffer._allocation);
 
-	static auto renderables_query = world.query<const MeshComponent, const Transform>();
+	tf::Taskflow prepareRender;
 
-	tf::Taskflow taskflow;
-	tf::Taskflow finishRender;
+	uint32_t uniform_offset = pad_uniform_buffer_size(sizeof(GPUSceneData)) * 0;
 
-	auto finishRenderTask = finishRender.emplace([]() {});
+	auto prepRender = prepareRender.emplace([this, &world, frameIndex = frameIndex, projection = projection, view = view, uniform_offset = uniform_offset](tf::Subflow& subflow) {
+		tf::Taskflow taskflow;
 
-	auto materialCompare = [](
-		flecs::entity_t e1,
-		const MeshComponent* p1,
-		flecs::entity_t e2,
-		const MeshComponent* p2)
-	{
-		(void) e1;
-		(void) e2;
-		return (&p1->_material > &p2->_material) ? 1 : -1;
-	};
-
-	renderables_query.order_by<MeshComponent>(materialCompare);
-
-	/*renderables_query.group_by<MeshComponent>([](
-		flecs::entity_t e1,
-		const MeshComponent* p1,
-		flecs::entity_t e2,
-		const MeshComponent* p2)
+		auto materialCompare = [](
+			flecs::entity_t e1,
+			const MeshComponent* p1,
+			flecs::entity_t e2,
+			const MeshComponent* p2)
 		{
+			(void) e1;
+			(void) e2;
+			return (&p1->_material > &p2->_material) ? 1 : -1;
+		};
 			
-		});*/
+		auto renderables_query = world.query<const MeshComponent, const Transform>();
+		renderables_query.order_by<MeshComponent>(materialCompare);
 
-	renderables_query.iter([&](flecs::iter& it, const MeshComponent* mesh, const Transform* transform)
+		renderables_query.iter([&](flecs::iter& it, const MeshComponent* mesh, const Transform* transform)
 		{
-			auto start = 0;
-			auto end = 0;
-			Material* currentMat = mesh[0]._material;
-			for (auto i = 0; i < it.count(); ++i)
-			{
-				if(i != *it.end())
+				auto start = 0;
+				auto end = 0;
+				Material* currentMat = mesh[0]._material;
+				for(auto i = 0; i < it.count(); ++i)
 				{
-					if(currentMat != mesh[i + 1]._material)
+					if(i != *it.end())
 					{
-						currentMat = mesh[i + 1]._material;
-						auto current = i;
-						end = current;
-						const auto* currentFrame = &get_current_frame();
-						auto& executor = this->executor;
-						taskflow.emplace([=, &executor]()
-							{
-								ZoneScopedN("single material render");
+						if(currentMat != mesh[i + 1]._material)
+						{
+							currentMat = mesh[i + 1]._material;
+							auto current = i;
+							end = current;
+							const auto* currentFrame = &get_current_frame();
+							auto& executor = this->executor;
 
-								VkCommandBuffer callCmdBuf = get_current_frame().commandBuffers[executor.this_worker_id()];
+							auto vie = view;
+							auto project = projection;
+							auto frameInde = frameIndex;
+							auto asd = uniform_offset;
 
-								//TODO fix vulkan profiling
-								//TracyVkZone(currentFrame->_tracyContext, callCmdBuf, "Material render");
-
-								vkCmdBindPipeline(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipeline);
-
-								//camera data descriptor
-								uint32_t uniform_offset = pad_uniform_buffer_size(sizeof(GPUSceneData)) * frameIndex;
-								vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 0, 1, &currentFrame->globalDescriptor, 1, &uniform_offset);
-
-								//object data descriptor
-								vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 1, 1, &currentFrame->objectDescriptor, 0, nullptr);
-
-								vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 2, 1, &mesh[start]._material->albedo->textureSet, 0, nullptr);
-
-								for(auto it = start; it < end; it++)
+							subflow.emplace([&executor, currentFrame, mesh, transform, start, end, this, view, projection, frameIndex = frameInde, uniform_offset]()
 								{
-									glm::mat4 model = transform[it].getModelMatrix();
-									//final render matrix, that we are calculating on the cpu
-									glm::mat4 mesh_matrix = projection * view * model;
+									ZoneScopedN("single material render");
 
-									MeshPushConstants constants = {};
-									constants.render_matrix = transform[it].getModelMatrix();
+									VkCommandBuffer callCmdBuf = currentFrame->commandBuffers[executor.this_worker_id()];
 
-									//upload the mesh to the GPU via pushconstants
-									vkCmdPushConstants(callCmdBuf, mesh[it]._material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
+									////TODO fix vulkan profiling
+									////TracyVkZone(currentFrame->_tracyContext, callCmdBuf, "Material render");
 
-									//bind the mesh vertex buffer with offset 0
-									VkDeviceSize offset = 0;
-									vkCmdBindVertexBuffers(callCmdBuf, 0, 1, &mesh[it]._mesh->_vertexBuffer._buffer, &offset);
+									vkCmdBindPipeline(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipeline);
 
-									//we can now draw
-									vkCmdDraw(callCmdBuf, mesh[it]._mesh->_vertices.size(), 1, 0, 0);
-								}
-							});
-						start = end;
+									////camera data descriptor
+									vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 0, 1, &currentFrame->globalDescriptor, 1, &uniform_offset);
+
+									//object data descriptor
+									vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 1, 1, &currentFrame->objectDescriptor, 0, nullptr);
+
+									vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 2, 1, &mesh[start]._material->albedo->textureSet, 0, nullptr);
+
+									for(auto it = start; it < end; it++)
+									{
+										glm::mat4 model = transform[it].getModelMatrix();
+										//final render matrix, that we are calculating on the cpu
+										glm::mat4 mesh_matrix = projection * view * model;
+
+										MeshPushConstants constants = {};
+										constants.render_matrix = transform[it].getModelMatrix();
+
+										//upload the mesh to the GPU via pushconstants
+										vkCmdPushConstants(callCmdBuf, mesh[it]._material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
+
+										//bind the mesh vertex buffer with offset 0
+										VkDeviceSize offset = 0;
+										vkCmdBindVertexBuffers(callCmdBuf, 0, 1, &mesh[it]._mesh->_vertexBuffer._buffer, &offset);
+
+										//we can now draw
+										vkCmdDraw(callCmdBuf, mesh[it]._mesh->_vertices.size(), 1, 0, 0);
+									}
+								}).name("single material render task");
+							start = end;
+						}
 					}
 				}
-			}
 		});
+	}).name("render task");
 
-	executor.run(taskflow);
-	executor.run(finishRender);
-
+	if(executor.num_topologies() != 0)
+	{
+		executor.wait_for_all();
+	}
+	executor.run(std::move(prepareRender));
 	executor.wait_for_all();
+
 
 	for(int i = 0; i < get_current_frame().commandBuffers.size(); i++)
 	{
@@ -1466,8 +1528,8 @@ void VulkanEngine::init_scene(flecs::world& world)
 	//empire_ent.set<MeshComponent>({get_mesh("empire"), get_material("texturedmesh")});
 	//empire_ent.set<Transform>({ glm::translate(glm::vec3{ 5,-10,0 }) });
 
-	for (int x = -100; x <= 100; x++) {
-		for (int y = -100; y <= 0; y++) {
+	for (int x = -10; x <= 10; x++) {
+		for (int y = -10; y <= 0; y++) {
 			RenderObject tri = {};
 			tri.mesh = get_mesh("cube");
 			tri.material = get_material("green_voxel");
@@ -1480,7 +1542,7 @@ void VulkanEngine::init_scene(flecs::world& world)
 			ent.set<MeshComponent>({tri.mesh, tri.material});
 			ent.set<Transform>({ glm::vec3(x, -1.0f, y), glm::quat(1.0, 0.0, 0.0, 0.0), glm::vec3(0.5, 0.5, 0.5) });
 		}
-		for(int y = 1; y <= 100; y++)
+		for(int y = 1; y <= 10; y++)
 		{
 			RenderObject tri = {};
 			tri.mesh = get_mesh("cube");

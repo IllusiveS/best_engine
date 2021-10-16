@@ -14,6 +14,7 @@ AllocatedBuffer BufferBuilder::build()
 	bufferInfo.pNext = nullptr;
 
 	bufferInfo.size = allocSize.value_or(0);
+	assert(bufferInfo.size > 0);
 	bufferInfo.usage = usage.value_or(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
 
@@ -23,10 +24,11 @@ AllocatedBuffer BufferBuilder::build()
 	AllocatedBuffer newBuffer = {};
 
 	//allocate the buffer
-	VK_CHECK(vmaCreateBuffer(_allocator.value(), &bufferInfo, &vmaallocInfo,
+	const auto result = vmaCreateBuffer(_allocator.value(), &bufferInfo, &vmaallocInfo,
 		&newBuffer._buffer,
 		&newBuffer._allocation,
-		nullptr));
+		nullptr);
+	VK_CHECK(result);
 	
 	if(debugName.has_value())
 	{
