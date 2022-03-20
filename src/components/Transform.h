@@ -45,9 +45,21 @@ struct Transform{
 		return transform;
 	}
 
+	glm::vec3 forward() const
+	{
+		return transform[0];
+	}
+	glm::vec3 right() const
+	{
+		return transform[1];
+	}
+	glm::vec3 up() const
+	{
+		return transform[2];
+	}
+
 	void updateModelMatrix();
 
-private:
 	glm::mat4 transform;
 };
 

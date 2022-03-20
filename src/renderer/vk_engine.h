@@ -19,13 +19,14 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
-#include <entt.hpp>
 
 #include "taskflow.hpp"
 
 #include <flecs.h>
 
 #include <TracyVulkan.hpp>
+
+#include "util/File.h"
 
 
 constexpr unsigned int FRAME_OVERLAP = 2;
@@ -65,13 +66,14 @@ struct FrameData {
 
 	VkDescriptorSet globalDescriptor;
 
-	std::map<std::thread::id, int> threads;
 	std::vector< VkCommandPool > commandPools;
 	std::vector< VkCommandBuffer > commandBuffers;
 };
 
+struct HAS_MATERIAL {};
 
 struct Material {
+	flecs::entity materialEntity;
 	VkPipeline pipeline;
 	VkPipelineLayout pipelineLayout;
 	Texture* albedo;
@@ -90,6 +92,7 @@ struct MeshPushConstants {
 
 struct DebugPushConstants
 {
+	glm::mat4 render_matrix;
 	glm::vec4 points[2];
 	glm::vec4 color;
 };
@@ -136,9 +139,23 @@ public:
 	VkPipeline build_pipeline(VkDevice device, VkRenderPass pass);
 };
 
+struct VulkanEngineGlobals
+{
+	VkInstance _instance;
+	VkDevice _device;
+	flecs::world* _world;
+};
 
 class VulkanEngine {
+	static VulkanEngine * _engine;
 public:
+	static VulkanEngineGlobals Globals()
+	{
+		return { _engine->_instance, _engine->_device, &_engine->world };
+	}
+public:
+
+
 	VulkanEngine();
 
 	static PFN_vkSetDebugUtilsObjectNameEXT setObjectDebugName;
@@ -154,16 +171,16 @@ public:
 	struct SDL_Window* _window{ nullptr };
 
 	//initializes everything in the engine
-	void init(flecs::world &world);
+	void init();
 
 	//shuts down the engine
 	void cleanup();
 
 	//draw loop
-	void draw(flecs::world& world);
+	void draw();
 
 	//run main loop
-	void run(flecs::world& world);
+	void run();
 
 	void system_update_global_transforms(flecs::world& world);
 	void system_update_model_matrixes(flecs::world& world);
@@ -276,6 +293,8 @@ public:
 	constexpr bool isProfilingEnabled() { return debug; };
 	constexpr bool areValidationLayersEnabled() { return debug; };
 
+	flecs::world world;
+
 private:
 	void init_vulkan();
 	void init_swapchain(); 
@@ -291,23 +310,22 @@ private:
 
 	void init_imgui();
 
+	void compile_shaders();
+	void compile_shader(File&& file);
+
 	void load_meshes();
 	void load_mesh(const std::string& path, const std::string& id);
 
-	void init_scene(flecs::world& world);
+	void init_scene();
 
 	void upload_mesh(Mesh& mesh);
 
 	size_t pad_uniform_buffer_size(size_t originalSize);
-	
-	int worldThreads{ 8 };
-	tf::Executor executor;
 
-	tf::CriticalSection criticalSectionFilesystem{ 1 };
-	tf::CriticalSection criticalSectionLongJob{ 2 };
-	tf::CriticalSection criticalSectionImmideateSubmit{ 1 };
-
+protected:
 	std::vector<flecs::world> stages;
+
+	std::mutex submitMutex;
 };
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debug_utils_messenger_callback(

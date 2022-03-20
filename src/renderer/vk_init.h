@@ -8,6 +8,9 @@
 #include "vk_types.h"
 #include "vk_engine.h"
 
+#include <util/Resource.h>
+#include <renderer/shader/Shader.h>
+
 namespace vkinit {
 	VkCommandPoolCreateInfo command_pool_create_info(uint32_t queueFamilyIndex, VkCommandPoolCreateFlags flags = 0);
 
@@ -18,7 +21,7 @@ namespace vkinit {
 
 	VkSubmitInfo submit_info(VkCommandBuffer* cmd);
 
-	VkPipelineShaderStageCreateInfo pipeline_shader_stage_create_info(VkShaderStageFlagBits stage, VkShaderModule shaderModule);
+	VkPipelineShaderStageCreateInfo pipeline_shader_stage_create_info(VkShaderStageFlagBits stage, Resource<Shader> shaderModule);
 
 	VkPipelineVertexInputStateCreateInfo vertex_input_state_create_info();
 

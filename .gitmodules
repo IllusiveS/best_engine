@@ -31,3 +31,9 @@
 [submodule "third_party/flecs"]
 	path = third_party/flecs
 	url = https://github.com/SanderMertens/flecs.git
+[submodule "third_party/shaderc"]
+	path = third_party/shaderc
+	url = git@github.com:google/shaderc.git
+[submodule "third_party/ImGuizmo"]
+	path = third_party/ImGuizmo
+	url = git@github.com:CedricGuillemet/ImGuizmo.git

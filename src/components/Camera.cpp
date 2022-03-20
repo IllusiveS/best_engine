@@ -3,3 +3,14 @@
 //
 
 #include "Camera.h"
+
+void Camera::setFov(const float fov)
+{
+	FOV = fov;
+}
+
+
+void Camera::updateExtends()
+{
+	
+}

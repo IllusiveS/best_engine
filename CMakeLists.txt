@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.19)
 project(best_engine)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")
 
-add_executable(best_engine third_party/tracy/TracyClient.cpp main.cpp third_party/tinyobjloader/tiny_obj_loader.cc src/renderer/vk_engine.cpp src/renderer/vk_engine.h src/renderer/vk_init.cpp src/renderer/vk_init.h src/renderer/vk_types.cpp src/renderer/vk_types.h third_party/vk-bootstrap/src/VkBootstrap.cpp src/renderer/vk_mesh.cpp src/renderer/vk_mesh.h src/script/ScriptingMachine.cpp src/script/ScriptingMachine.h src/script/Script.cpp src/script/Script.h src/components/Camera.cpp src/components/Camera.h src/components/Transform.cpp src/components/Transform.h src/components/MeshComponent.cpp src/components/MeshComponent.h "src/renderer/vk_buffer.h" "src/renderer/vk_buffer.cpp" "src/components/BoxCollision.h" src/renderer/vk_texture.cpp src/renderer/vk_texture.h "src/input_manager/input_manager.h" "src/input_manager/input_manager.cpp" "src/renderer/descriptor_set_abstraction/DescriptorBuilder.h" "src/renderer/descriptor_set_abstraction/DescriptorAllocator.h" "src/renderer/descriptor_set_abstraction/DescriptorLayoutCache.h" "src/renderer/descriptor_set_abstraction/DescriptorAllocator.cpp" "src/renderer/descriptor_set_abstraction/DescriptorLayoutCache.cpp" "src/renderer/descriptor_set_abstraction/DescriptorBuilder.cpp")
+add_executable(best_engine third_party/tracy/TracyClient.cpp main.cpp third_party/tinyobjloader/tiny_obj_loader.cc src/renderer/vk_engine.cpp src/renderer/vk_engine.h src/renderer/vk_init.cpp src/renderer/vk_init.h src/renderer/vk_types.cpp src/renderer/vk_types.h third_party/vk-bootstrap/src/VkBootstrap.cpp src/renderer/vk_mesh.cpp src/renderer/vk_mesh.h src/script/ScriptingMachine.cpp src/script/ScriptingMachine.h src/script/Script.cpp src/script/Script.h src/components/Camera.cpp src/components/Camera.h src/components/Transform.cpp src/components/Transform.h src/components/MeshComponent.cpp src/components/MeshComponent.h "src/renderer/vk_buffer.h" "src/renderer/vk_buffer.cpp" "src/collision/BoxCollisionComponent.h" src/renderer/vk_texture.cpp src/renderer/vk_texture.h "src/input_manager/input_manager.h" "src/input_manager/input_manager.cpp" "src/renderer/descriptor_set_abstraction/DescriptorBuilder.h" "src/renderer/descriptor_set_abstraction/DescriptorAllocator.h" "src/renderer/descriptor_set_abstraction/DescriptorLayoutCache.h" "src/renderer/descriptor_set_abstraction/DescriptorAllocator.cpp" "src/renderer/descriptor_set_abstraction/DescriptorLayoutCache.cpp" "src/renderer/descriptor_set_abstraction/DescriptorBuilder.cpp" "src/collision/Ray.h" "src/collision/CollisionDetectionSystem.cpp" "src/util/md5.h" "src/util/File.h" "src/util/md5.cpp" "src/util/File.cpp" "src/renderer/shader/ShaderManager.h" "src/renderer/shader/ShaderManager.cpp" "src/util/Taskmaster/Taskmaster.h" "src/util/Taskmaster/TaskBuilder.h" "src/util/Taskmaster/Taskmaster.cpp" "src/util/Taskmaster/TaskBuilder.cpp" "src/renderer/shader/ShaderCompiler.h" "src/renderer/shader/ShaderCompiler.cpp" "src/util/Resource.h")
 
 target_compile_definitions(best_engine PRIVATE TRACY_ENABLE)
 
@@ -33,12 +33,11 @@ include_directories(third_party/vk-bootstrap/src)
 include_directories(third_party/taskflow/taskflow)
 include_directories(third_party/tracy/)
 include_directories(third_party/glm)
-include_directories(third_party/entt/single_include/entt)
 include_directories(third_party/wren/src/include)
 include_directories(third_party/VulkanMemoryAllocator/include)
 include_directories(third_party/tinyobjloader)
-include_directories(third_party/flecs/include/flecs)
 include_directories(third_party/imgui)
+include_directories(third_party/flecs/include/flecs)
 
 include_directories(${SDL2_INCLUDE_DIR})
 
@@ -48,14 +47,19 @@ ELSE()
     target_compile_definitions(best_engine PRIVATE VK_USE_PLATFORM_XLIB_KHR)
 ENDIF()
 
+target_include_directories(best_engine PUBLIC glslc)
+target_include_directories(best_engine PUBLIC shaderc)
 target_include_directories(best_engine PRIVATE Vulkan::Vulkan)
 target_include_directories(best_engine PRIVATE ${SDL2_INCLUDE_DIR})
 
+target_link_libraries(best_engine glslc)
+target_link_libraries(best_engine shaderc)
 target_link_libraries(best_engine wren)
 target_link_libraries(best_engine Vulkan::Vulkan)
 target_link_libraries(best_engine flecs)
 target_link_libraries(best_engine ${SDL2_LIBRARIES})
 target_link_libraries(best_engine imgui)
+target_link_libraries(best_engine imgui_gizmo)
 
 find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)
 

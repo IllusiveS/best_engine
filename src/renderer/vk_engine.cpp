@@ -16,12 +16,19 @@
 
 #include <iostream>
 #include <fstream>
-#include <entt.hpp>
 #include <components/Camera.h>
 #include <components/Transform.h>
 #include <components/MeshComponent.h>
 
+#include "util/Taskmaster/TaskMaster.h"
+#include "renderer/shader/ShaderManager.h"
+
+#include "collision/CollisionDetectionSystem.h"
+
+#include <collision/BoxCollisionComponent.h>
+
 #include <functional>
+#include <cassert>
 
 #include <Tracy.hpp>
 
@@ -30,6 +37,8 @@
 #include "backends/imgui_impl_vulkan.h"
 
 #include "input_manager/input_manager.h"
+
+VulkanEngine* VulkanEngine::_engine = nullptr;
 
 PFN_vkSetDebugUtilsObjectNameEXT VulkanEngine::setObjectDebugName = nullptr;
 
@@ -90,11 +99,28 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass) {
 	}
 }
 
-VulkanEngine::VulkanEngine() : executor(worldThreads) {}
+VulkanEngine::VulkanEngine()
+{
+	_engine = this;
+	auto shaderManager = new ShaderManagerMainThread();
+	shaderManager->Setup();
+}
 
-void VulkanEngine::init(flecs::world &world)
+void VulkanEngine::init()
 {
 	ZoneScoped;
+	new Taskmaster(4);
+
+	auto camEntity = world.entity("Camera");
+	camEntity.set<Transform>({ glm::vec3{ 0.f,-6.f,-10.f } });
+	camEntity.add<Camera>();
+
+	InputManager inputManager;
+
+	world.set<InputManager>(inputManager);
+
+	_engine = this;
+
 	// We initialize SDL and create a window with it.
 	SDL_Init(SDL_INIT_VIDEO);
 
@@ -118,6 +144,8 @@ void VulkanEngine::init(flecs::world &world)
 	auto thing = vkGetDeviceProcAddr(_device, "vkSetDebugUtilsObjectNameEXT");
 	setObjectDebugName = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(thing);
 
+	compile_shaders();
+
 	//create the swapchain
 	init_swapchain();
 
@@ -131,22 +159,26 @@ void VulkanEngine::init(flecs::world &world)
 
 	init_descriptors();
 
-	init_pipelines();
-
 	load_meshes();
 
 	load_images();
 
-	init_scene(world);
+	Taskmaster::Get()->executor.wait_for_all();
+
+	init_pipelines();
+
+	init_scene();
 
 	init_imgui();
 
 	init_tracy();
 
+	Taskmaster::Get()->executor.wait_for_all();
+
 	//everything went fine
 	_isInitialized = true;
 
-	world.set_stages(worldThreads);
+	world.set_stages(Taskmaster::Get()->worldThreads);
 }
 
 void VulkanEngine::init_tracy()
@@ -235,6 +267,34 @@ void VulkanEngine::init_imgui()
 			vkDestroyDescriptorPool(_device, imguiPool, nullptr);
 			ImGui_ImplVulkan_Shutdown();
 		});
+}
+
+void VulkanEngine::compile_shaders()
+{
+	//TODO get all the engine shaders
+	
+	//TODO iterate, check each one for compiled bytecode, compile if timestamp is newer
+
+	using recursive_directory_iterator = std::filesystem::recursive_directory_iterator;
+
+	std::filesystem::path shaderPath{ Directory::getProjectDir() + "assets/shaders" };
+	
+	auto asd = std::filesystem::current_path().generic_string();
+
+	for(const auto& dirEntry : recursive_directory_iterator(shaderPath))
+	{
+		auto str = dirEntry.path().lexically_normal().generic_string();
+		auto absoluteProject = Directory::getProjectDir();
+		auto absolute = std::filesystem::absolute(dirEntry);
+		auto resourceName = std::filesystem::relative(dirEntry.path().lexically_normal(), Directory::getProjectDir()).generic_string();
+		bool isVertex = dirEntry.path().extension() == ".vert";
+		ShaderManager::Get()->loadShader(absolute.generic_string(), str, isVertex ? ShaderType::VERTEX : ShaderType::FRAGMENT);
+	}
+}
+
+void VulkanEngine::compile_shader(File&& file)
+{
+	//TODO make a fancy task to compile a shader with a FUTURE!!!
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debug_utils_messenger_callback(
@@ -398,7 +458,7 @@ void VulkanEngine::init_commands()
 	VkCommandPoolCreateInfo commandPoolInfo = vkinit::command_pool_create_info(_graphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 
 	for (int i = 0; i < FRAME_OVERLAP; i++) {
-		_frames[i].commandPools.resize(worldThreads);
+		_frames[i].commandPools.resize(Taskmaster::Get()->worldThreads);
 
 		for(auto& pool : _frames[i].commandPools)
 		{
@@ -412,7 +472,7 @@ void VulkanEngine::init_commands()
 
 		VK_CHECK(vkAllocateCommandBuffers(_device, &cmdAllocInfo, &_frames[i]._mainCommandBuffer));
 
-		_frames[i].commandBuffers.resize(worldThreads);
+		_frames[i].commandBuffers.resize(Taskmaster::Get()->worldThreads);
 
 		for(int thread_id = 0; thread_id < _frames[i].commandPools.size(); thread_id++)
 		{
@@ -546,6 +606,19 @@ void VulkanEngine::init_sync_structures()
 
 		VK_CHECK(vkCreateFence(_device, &fenceCreateInfo, nullptr, &_frames[i]._renderFence));
 
+		std::string fenceName = "render fence frame " + std::to_string(i);
+
+		auto debugInfo = VkDebugUtilsObjectNameInfoEXT{};
+		debugInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+		debugInfo.objectType = VK_OBJECT_TYPE_FENCE;
+		debugInfo.objectHandle = (uint64_t) _frames[i]._renderFence;
+		debugInfo.pObjectName = fenceName.c_str();
+
+		VK_CHECK(VulkanEngine::setObjectDebugName(
+			_device
+			, &debugInfo)
+		);
+
 		//enqueue the destruction of the fence
 		_mainDeletionQueue.push_function([=]() {
 			vkDestroyFence(_device, _frames[i]._renderFence, nullptr);
@@ -571,28 +644,25 @@ void VulkanEngine::init_sync_structures()
 			vkDestroyFence(_device, _uploadContext._uploadFence, nullptr);
 		});
 
+	
+	std::string fenceName = "upload fence";
+
+	auto debugInfo = VkDebugUtilsObjectNameInfoEXT{};
+	debugInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+	debugInfo.objectType = VK_OBJECT_TYPE_FENCE;
+	debugInfo.objectHandle = (uint64_t) _uploadContext._uploadFence;
+	debugInfo.pObjectName = fenceName.c_str();
+
+	VK_CHECK(VulkanEngine::setObjectDebugName(
+		_device
+		, &debugInfo)
+	);
+
 }
 
 void VulkanEngine::init_textured_pipeline()
 {
 	ZoneScoped;
-
-	//SHADERY
-	VkShaderModule texturedMeshShader;
-	if(!load_shader_module("../shaders/textured_lit.frag.spv", &texturedMeshShader))
-	{
-		std::cout << "Error when building the textured mesh shader" << std::endl;
-	}
-	VkShaderModule meshVertShader;
-	if(!load_shader_module("../shaders/tri_mesh.vert.spv", &meshVertShader))
-	{
-		std::cout << "Error when building the triangle vertex shader module" << std::endl;
-	}
-	else
-	{
-		std::cout << "Red Triangle vertex shader succesfully loaded" << std::endl;
-	}
-
 	//BAZA DO PIPELINE
 	PipelineBuilder pipelineBuilder;
 	pipelineBuilder._depthStencil = vkinit::depth_stencil_create_info(true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
@@ -636,11 +706,19 @@ void VulkanEngine::init_textured_pipeline()
 	pipelineBuilder._vertexInputInfo.pVertexBindingDescriptions = vertexDescription.bindings.data();
 	pipelineBuilder._vertexInputInfo.vertexBindingDescriptionCount = vertexDescription.bindings.size();
 
+	auto triMeshShaderOpt = ShaderManager::Get()->getShader("assets/shaders/tri_mesh.vert");
+	assert(triMeshShaderOpt.has_value());
+	auto triMeshShader = triMeshShaderOpt.value();
+
+	auto texturedLitShaderOpt = ShaderManager::Get()->getShader("assets/shaders/textured_lit.frag");
+	assert(texturedLitShaderOpt.has_value());
+	auto texturedLitShader = texturedLitShaderOpt.value();
+
 	//create pipeline for textured drawing
 	pipelineBuilder._shaderStages.push_back(
-		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, meshVertShader));
+		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, triMeshShader));
 	pipelineBuilder._shaderStages.push_back(
-		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, texturedMeshShader));
+		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, texturedLitShader));
 
 	//we start from just the default empty pipeline layout info
 	VkPipelineLayoutCreateInfo mesh_pipeline_layout_info = vkinit::pipeline_layout_create_info();
@@ -672,29 +750,11 @@ void VulkanEngine::init_textured_pipeline()
 
 	create_material(pipelineBuilder.build_pipeline(_device, _renderPass), texturedPipeLayout, "green_voxel");
 	create_material(pipelineBuilder.build_pipeline(_device, _renderPass), texturedPipeLayout, "black_voxel");
-
-	vkDestroyShaderModule(_device, meshVertShader, nullptr);
-	vkDestroyShaderModule(_device, texturedMeshShader, nullptr);
 }
 
 void VulkanEngine::init_debug_pipeline()
 {
 	ZoneScoped;
-	//SHADERY
-	VkShaderModule debugLineFragShader;
-	if(!load_shader_module("../shaders/debug_line.frag.spv", &debugLineFragShader))
-	{
-		std::cout << "Error when building the textured mesh shader" << std::endl;
-	}
-	VkShaderModule debugLineVertShader;
-	if(!load_shader_module("../shaders/debug_line.vert.spv", &debugLineVertShader))
-	{
-		std::cout << "Error when building the triangle vertex shader module" << std::endl;
-	}
-	else
-	{
-		std::cout << "Red Triangle vertex shader succesfully loaded" << std::endl;
-	}
 
 	//BAZA DO PIPELINE
 	PipelineBuilder pipelineBuilder;
@@ -732,11 +792,14 @@ void VulkanEngine::init_debug_pipeline()
 	//vertex input controls how to read vertices from vertex buffers. We aren't using it yet
 	pipelineBuilder._vertexInputInfo = vkinit::vertex_input_state_create_info();
 
+	auto debugLineShader = ShaderManager::Get()->getShader("assets/shaders/debug_line.vert").value();
+	auto DebugLineFragShader = ShaderManager::Get()->getShader("assets/shaders/debug_line.frag").value();
+
 	//create pipeline for textured drawing
 	pipelineBuilder._shaderStages.push_back(
-		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, debugLineVertShader));
+		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, debugLineShader));
 	pipelineBuilder._shaderStages.push_back(
-		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, debugLineFragShader));
+		vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, DebugLineFragShader));
 
 	//we start from just the default empty pipeline layout info
 	VkPipelineLayoutCreateInfo mesh_pipeline_layout_info = vkinit::pipeline_layout_create_info();
@@ -763,10 +826,8 @@ void VulkanEngine::init_debug_pipeline()
 
 	pipelineBuilder._pipelineLayout = texturedPipeLayout;
 	VkPipeline texPipeline = pipelineBuilder.build_pipeline(_device, _renderPass);
-	create_material(texPipeline, texturedPipeLayout, "debugline");
 
-	vkDestroyShaderModule(_device, debugLineVertShader, nullptr);
-	vkDestroyShaderModule(_device, debugLineFragShader, nullptr);
+	create_material(texPipeline, texturedPipeLayout, "debugline");
 }
 
 void VulkanEngine::init_pipelines()
@@ -780,48 +841,27 @@ void VulkanEngine::init_pipelines()
 void VulkanEngine::load_meshes()
 {
 	ZoneScoped;
-	//make the array 3 vertices long
-	_triangleMesh._vertices.resize(3);
+	////make the array 3 vertices long
+	//_triangleMesh._vertices.resize(3);
 
-	//vertex positions
-	_triangleMesh._vertices[0].position = { 1.f, 1.f, 0.0f };
-	_triangleMesh._vertices[1].position = {-1.f, 1.f, 0.0f };
-	_triangleMesh._vertices[2].position = { 0.f,-1.f, 0.0f };
+	////vertex positions
+	//_triangleMesh._vertices[0].position = { 1.f, 1.f, 0.0f };
+	//_triangleMesh._vertices[1].position = {-1.f, 1.f, 0.0f };
 
-	//vertex colors, all green
-	_triangleMesh._vertices[0].color = { 0.f, 1.f, 0.0f }; //pure green
-	_triangleMesh._vertices[1].color = { 0.f, 1.f, 0.0f }; //pure green
-	_triangleMesh._vertices[2].color = { 0.f, 1.f, 0.0f }; //pure green
+	////vertex colors, all green
+	//_triangleMesh._vertices[0].color = { 0.f, 1.f, 0.0f }; //pure green
+	//_triangleMesh._vertices[1].color = { 0.f, 1.f, 0.0f }; //pure green
+
+	//upload_mesh(_triangleMesh);
+
+	load_mesh("assets/debug.obj", "debug");
 
 	load_mesh("assets/monkey_flat.obj", "monkey");
-	load_mesh("assets/monkey_flat.obj", "monkey9");
-	load_mesh("assets/monkey_flat.obj", "monkey8");
-	load_mesh("assets/monkey_flat.obj", "monkey7");
-	load_mesh("assets/monkey_flat.obj", "monkey6");
-	load_mesh("assets/monkey_flat.obj", "monkey5");
-	load_mesh("assets/monkey_flat.obj", "monkey4");
-	load_mesh("assets/monkey_flat.obj", "monkey3");
-	load_mesh("assets/monkey_flat.obj", "monkey2");
 	load_mesh("assets/lost_empire.obj", "empire");
 	load_mesh("assets/cube.obj", "cube");
-	load_mesh("assets/cube.obj", "cube2");
-	load_mesh("assets/cube.obj", "cube3");
-	load_mesh("assets/cube.obj", "cube4");
-	load_mesh("assets/cube.obj", "cube5");
-	load_mesh("assets/cube.obj", "cube7");
-	load_mesh("assets/cube.obj", "cube6");
-	load_mesh("assets/cube.obj", "cube8");
-	load_mesh("assets/cube.obj", "cube9");
-	load_mesh("assets/cube.obj", "cube0");
-	load_mesh("assets/cube.obj", "cubea");
-	load_mesh("assets/cube.obj", "cubes");
-	load_mesh("assets/cube.obj", "cubed");
-	load_mesh("assets/cube.obj", "cubef");
-	load_mesh("assets/cube.obj", "cubeg");
-	load_mesh("assets/cube.obj", "cubeh");
-	load_mesh("assets/cube.obj", "cubej");
 
 	load_mesh("assets/Man.obj", "human");
+	Taskmaster::Get()->executor.wait_for_all();
 }
 
 void VulkanEngine::load_mesh(const std::string& path, const std::string& id)
@@ -830,6 +870,7 @@ void VulkanEngine::load_mesh(const std::string& path, const std::string& id)
 
 	loadMeshTaskflow.emplace([path, this, id](tf::Subflow& subflow)
 		{
+			Taskmaster* taskMaster = Taskmaster::Get();
 			auto meshPath = path;
 
 			Mesh newMesh{};
@@ -840,8 +881,8 @@ void VulkanEngine::load_mesh(const std::string& path, const std::string& id)
 					newMesh.load_from_file(meshPath.c_str());
 				});
 
-			criticalSectionLongJob.add(readFromDrive);
-			criticalSectionFilesystem.add(readFromDrive);
+			taskMaster->criticalSectionLongJob.add(readFromDrive);
+			taskMaster->criticalSectionFilesystem.add(readFromDrive);
 
 			tf::Task parseMesh = subflow.emplace([this, &newMesh]()
 				{
@@ -849,7 +890,8 @@ void VulkanEngine::load_mesh(const std::string& path, const std::string& id)
 					newMesh.parse_data();
 				});
 			parseMesh.succeed(readFromDrive);
-			criticalSectionLongJob.add(parseMesh);
+			taskMaster->criticalSectionLongJob.add(parseMesh);
+			taskMaster->criticalSectionLongJob.add(parseMesh);
 
 			tf::Task uploadMeshTask = subflow.emplace([this, &newMesh, id]()
 				{
@@ -858,13 +900,13 @@ void VulkanEngine::load_mesh(const std::string& path, const std::string& id)
 					_meshes[id] = std::move(newMesh);
 				});
 			uploadMeshTask.succeed(parseMesh);
-			criticalSectionLongJob.add(uploadMeshTask);
-			criticalSectionImmideateSubmit.add(uploadMeshTask);
+			taskMaster->criticalSectionLongJob.add(uploadMeshTask);
+			taskMaster->criticalSectionImmideateSubmit.add(uploadMeshTask);
 
 			subflow.join();
 		});
 	
-	executor.run(std::move(loadMeshTaskflow));
+	Taskmaster::Get()->executor.run(std::move(loadMeshTaskflow));
 }
 
 void VulkanEngine::upload_mesh(Mesh& mesh)
@@ -935,7 +977,7 @@ void VulkanEngine::cleanup()
 	}
 }
 
-void VulkanEngine::draw(flecs::world& world)
+void VulkanEngine::draw()
 {
 	ZoneScoped;
 	ImGui::Render();
@@ -943,7 +985,7 @@ void VulkanEngine::draw(flecs::world& world)
 	{
 		ZoneScopedN("FENCE");
 		//wait until the GPU has finished rendering the last frame. Timeout of 1 second
-		VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
+		VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 999999999999));
 		VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._renderFence));
 	}
 
@@ -1116,7 +1158,7 @@ bool VulkanEngine::load_shader_module(const char* filePath, VkShaderModule* outS
 }
 
 
-void VulkanEngine::run(flecs::world& world)
+void VulkanEngine::run()
 {
 	bool bQuit = false;
 
@@ -1132,7 +1174,6 @@ void VulkanEngine::run(flecs::world& world)
 
 		ImGui::NewFrame();
 
-
 		//imgui commands
 		ImGui::ShowDemoWindow();
 
@@ -1140,7 +1181,7 @@ void VulkanEngine::run(flecs::world& world)
 		system_update_global_transforms(world);
 		system_update_model_matrixes(world);
 
-		draw(world);
+		draw();
 
 		//TODO enable losing and gaining mouse control
 		//SDL_WarpMouseInWindow(_window, _windowExtent.width / 2, _windowExtent.height / 2);
@@ -1158,19 +1199,18 @@ void VulkanEngine::system_update_global_transforms(flecs::world& world)
 {
 	ZoneScopedN("update transforms");
 
-	auto query = world.query_builder()
-		.term<Transform>()
-		.term<const Transform>()
-		.superset(flecs::ChildOf)
-		.oper(flecs::Optional)
+	auto query = world.query_builder<Transform, const Transform>()
+		.arg(2)
+			.set(flecs::Parent | flecs::Cascade)
+			.oper(flecs::Optional)
 		.build();
 
-	query.iter([](flecs::iter& it)
+	query.iter([](flecs::iter& it, Transform* local, const Transform* global)
 		{
 			auto transform = it.term<Transform>(1);
 			auto parent_wp = it.term<const Transform>(2);
 
-			if(!parent_wp.is_set())
+			if(!it.is_set(2))
 			{
 				for(auto row : it)
 				{
@@ -1202,25 +1242,17 @@ void VulkanEngine::system_update_model_matrixes(flecs::world& world)
 
 	stages.clear();
 
-	tf::Task prepareTask = mainFlow.emplace([this, &world]()
+	/*tf::Task prepareTask = mainFlow.emplace([this, &world]()
 	{
 		ZoneScopedN("update model matrixes begin");
-		world.staging_begin();
-
-
-		for(int i = 0; i < worldThreads; ++i)
-		{
-			stages.push_back(world.get_stage(i));
-		}
 	}).name("prepare for matrix task");
 
 	tf::Task finishTask = mainFlow.emplace([&world]()
 		{
 			ZoneScopedN("update model matrixes end");
-			world.staging_end();
 		}).name("cleanup matrix task");
 
-	for(int i = 0; i < worldThreads; ++i)
+	for(int i = 0; i < Taskmaster::Get()->worldThreads; ++i)
 	{
 		mainFlow.emplace([q, this, i]()
 			{
@@ -1235,7 +1267,12 @@ void VulkanEngine::system_update_model_matrixes(flecs::world& world)
 		}).succeed(prepareTask).precede(finishTask).name("single update matrix task");
 	}
 	
-	executor.run(std::move(mainFlow));
+	Taskmaster::Get()->executor.run(std::move(mainFlow));*/
+
+	q.each([](Transform& trans) {
+		trans.updateModelMatrix();
+	});
+	Taskmaster::Get()->executor.wait_for_all();
 }
 
 void VulkanEngine::camera_system(flecs::world& world)
@@ -1301,14 +1338,25 @@ void VulkanEngine::camera_system(flecs::world& world)
 
 			transform.rotation = quatYaw * transform.rotation * quatPitch;
 		});
+
+	int xPos = 0;
+	int yPos = 0;
+
+	SDL_GetMouseState(&xPos, &yPos);
+
+	auto ray = CollisionDetectionSystem::generateRayFromCamera(world, { xPos, yPos });
+	auto entity = CollisionDetectionSystem::raycastSingleBox(world, ray);
+	std::cout << std::to_string(xPos) << " " << std::to_string(yPos) << std::endl;
+	std::cout << std::to_string(entity) << std::endl;
 }
 
 Material* VulkanEngine::create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string& name)
 {
 	ZoneScoped;
-	Material mat = {};
+	auto& mat = _materials[name];
 	mat.pipeline = pipeline;
 	mat.pipelineLayout = layout;
+	mat.materialEntity = VulkanEngine::world.entity();
 	_materials[name] = mat;
 	return &_materials[name];
 }
@@ -1343,6 +1391,7 @@ Mesh* VulkanEngine::get_mesh(const std::string& name)
 void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int count, flecs::world& world)
 {
 	ZoneScoped;
+
 	void* objectData;
 	vmaMapMemory(_allocator, get_current_frame().objectBuffer._allocation, &objectData);
 
@@ -1358,11 +1407,12 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 
 	glm::vec3 camPos = {};
 
-	static auto q = world.query<const Camera, const Transform>();
+	static auto q = world.query<Camera, const Transform>();
 
 	glm::mat4 view;
+	glm::mat4 projection;
 
-	q.each([&](const Camera& cam, const Transform& transform)
+	q.each([&](Camera& cam, const Transform& transform)
 		{
 		const glm::mat4 inverted = glm::inverse(transform.getModelMatrix());
 		const glm::vec3 pos = normalize(glm::vec3(inverted[2]));
@@ -1372,12 +1422,13 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 		const glm::vec3 lookPoint = forward + glm::vec3{ transform.getModelMatrix()[3] };
 
 		view = glm::lookAt(camPos, lookPoint, glm::vec3{ 0.0f, 1.0f, 0.0f });
+		projection = glm::perspective(glm::radians(cam.FOV), 1700.f / 900.f, 0.1f, 200.0f);
 	});
 
 	//camera view
 	//view = glm::translate(glm::mat4(1.f), camPos);
 	//camera projection
-	glm::mat4 projection = glm::perspective(glm::radians(70.f), 1700.f / 900.f, 0.1f, 200.0f);
+	projection = glm::perspective(glm::radians(70.f), 1700.f / 900.f, 0.1f, 200.0f);
 	projection[1][1] *= -1;
 
 	//fill a GPU camera data struct
@@ -1385,6 +1436,12 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 	camData.projection = projection;
 	camData.view = view;
 	camData.viewproj = projection * view;
+
+	q.each([&](Camera& cam, const Transform& transform)
+		{
+			cam.view = view;
+			cam.projection = projection;
+		});
 
 	//and copy it to the buffer
 	void* data;
@@ -1413,98 +1470,177 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 
 	uint32_t uniform_offset = pad_uniform_buffer_size(sizeof(GPUSceneData)) * 0;
 
-	auto prepRender = prepareRender.emplace([this, &world, frameIndex = frameIndex, projection = projection, view = view, uniform_offset = uniform_offset](tf::Subflow& subflow) {
-		tf::Taskflow taskflow;
+	auto materialCompare = [](
+		flecs::entity_t e1,
+		const MeshComponent* p1,
+		flecs::entity_t e2,
+		const MeshComponent* p2)
+	{
+		(void) e1;
+		(void) e2;
+		return (&p1->_material > &p2->_material) ? 1 : -1;
+	};
 
-		auto materialCompare = [](
-			flecs::entity_t e1,
-			const MeshComponent* p1,
-			flecs::entity_t e2,
-			const MeshComponent* p2)
-		{
-			(void) e1;
-			(void) e2;
-			return (&p1->_material > &p2->_material) ? 1 : -1;
-		};
-			
-		auto renderables_query = world.query<const MeshComponent, const Transform>();
-		renderables_query.order_by<MeshComponent>(materialCompare);
+	world.staging_begin();
 
-		renderables_query.iter([&](flecs::iter& it, const MeshComponent* mesh, const Transform* transform)
-		{
-				auto start = 0;
-				auto end = 0;
-				Material* currentMat = mesh[0]._material;
-				for(auto i = 0; i < it.count(); ++i)
-				{
-					if(i != *it.end())
+	static auto collision_box_debug_render_query = world.query_builder< const Transform, const BoxCollisionComponent>()
+		.build();
+
+
+
+	static auto renderables_query = world.query_builder<const MeshComponent, const Transform>()
+		//.arg(1).object<const MeshComponent>()
+		//.order_by<MeshComponent>(materialCompare)
+		//.arg(2).object<const Transform>()
+		.build();
+
+	auto& greenMat = _materials["green_voxel"];
+	auto& blackMat = _materials["black_voxel"];
+
+	static auto green_draw_query = world.query_builder< const Transform, const MeshComponent>()
+		.term<HAS_MATERIAL>(greenMat.materialEntity)
+		.build();
+
+	static auto black_draw_query = world.query_builder< const Transform, const MeshComponent>()
+		.term<HAS_MATERIAL>(blackMat.materialEntity)
+		.build();
+
+	static auto queries = {green_draw_query, black_draw_query};
+
+	for(auto& q : queries)
+	{
+		auto prepRender = prepareRender.emplace([this, &world, frameIndex = frameIndex, projection = projection, view = view, uniform_offset = uniform_offset, &q](tf::Subflow& subflow)
+			{
+				ZoneScopedN("single material render");
+				q.iter([&](flecs::iter& iter, const Transform* transform, const MeshComponent* mesh)
 					{
-						if(currentMat != mesh[i + 1]._material)
+						ZoneScopedN("single material render iter");
+						auto start = 0;
+						auto end = 0;
+						Material* currentMat = mesh[0]._material;
+
+						const auto* currentFrame = &get_current_frame();
+						auto& executor = Taskmaster::Get()->executor;
+
+						VkCommandBuffer callCmdBuf = currentFrame->commandBuffers[executor.this_worker_id()];
+
+						////TODO fix vulkan profiling
+						////TracyVkZone(currentFrame->_tracyContext, callCmdBuf, "Material render");
 						{
-							currentMat = mesh[i + 1]._material;
-							auto current = i;
-							end = current;
-							const auto* currentFrame = &get_current_frame();
-							auto& executor = this->executor;
+							ZoneScopedN("single material render iter bindings");
+							vkCmdBindPipeline(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipeline);
 
-							auto vie = view;
-							auto project = projection;
-							auto frameInde = frameIndex;
-							auto asd = uniform_offset;
+							////camera data descriptor
+							vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 0, 1, &currentFrame->globalDescriptor, 1, &uniform_offset);
 
-							subflow.emplace([&executor, currentFrame, mesh, transform, start, end, this, view, projection, frameIndex = frameInde, uniform_offset]()
-								{
-									ZoneScopedN("single material render");
+							//object data descriptor
+							vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 1, 1, &currentFrame->objectDescriptor, 0, nullptr);
 
-									VkCommandBuffer callCmdBuf = currentFrame->commandBuffers[executor.this_worker_id()];
+							vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 2, 1, &mesh[start]._material->albedo->textureSet, 0, nullptr);
+						}
+						
 
-									////TODO fix vulkan profiling
-									////TracyVkZone(currentFrame->_tracyContext, callCmdBuf, "Material render");
+						for(auto it : iter)
+						{
+							glm::mat4 model = transform[it].getModelMatrix();
+							//final render matrix, that we are calculating on the cpu
+							glm::mat4 mesh_matrix = projection * view * model;
 
-									vkCmdBindPipeline(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipeline);
+							MeshPushConstants constants = {};
+							constants.render_matrix = transform[it].getModelMatrix();
 
-									////camera data descriptor
-									vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 0, 1, &currentFrame->globalDescriptor, 1, &uniform_offset);
+							//upload the mesh to the GPU via pushconstants
+							vkCmdPushConstants(callCmdBuf, mesh[it]._material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
 
-									//object data descriptor
-									vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 1, 1, &currentFrame->objectDescriptor, 0, nullptr);
+							//bind the mesh vertex buffer with offset 0
+							VkDeviceSize offset = 0;
+							vkCmdBindVertexBuffers(callCmdBuf, 0, 1, &mesh[it]._mesh->_vertexBuffer._buffer, &offset);
 
-									vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh[start]._material->pipelineLayout, 2, 1, &mesh[start]._material->albedo->textureSet, 0, nullptr);
+							//we can now draw
+							vkCmdDraw(callCmdBuf, mesh[it]._mesh->_vertices.size(), 1, 0, 0);
+						}
 
-									for(auto it = start; it < end; it++)
-									{
-										glm::mat4 model = transform[it].getModelMatrix();
-										//final render matrix, that we are calculating on the cpu
-										glm::mat4 mesh_matrix = projection * view * model;
+					});
+			}).name("render task");
+	}
 
-										MeshPushConstants constants = {};
-										constants.render_matrix = transform[it].getModelMatrix();
+	
 
-										//upload the mesh to the GPU via pushconstants
-										vkCmdPushConstants(callCmdBuf, mesh[it]._material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &constants);
+	auto debugRender = prepareRender.emplace([&, this](tf::Subflow& subflow)
+		{
+			collision_box_debug_render_query.iter([&, this](flecs::iter& iter, const Transform* transform, const BoxCollisionComponent* collBox)
+				{
+					ZoneScopedN("debug lines render");
+					const auto* currentFrame = &get_current_frame();
+					VkCommandBuffer callCmdBuf = currentFrame->commandBuffers[Taskmaster::Get()->executor.this_worker_id()];
 
-										//bind the mesh vertex buffer with offset 0
-										VkDeviceSize offset = 0;
-										vkCmdBindVertexBuffers(callCmdBuf, 0, 1, &mesh[it]._mesh->_vertexBuffer._buffer, &offset);
+					////TODO fix vulkan profiling
+					////TracyVkZone(currentFrame->_tracyContext, callCmdBuf, "Material render");
 
-										//we can now draw
-										vkCmdDraw(callCmdBuf, mesh[it]._mesh->_vertices.size(), 1, 0, 0);
-									}
-								}).name("single material render task");
-							start = end;
+
+					auto& debugMat = _materials["debugline"];
+
+					vkCmdBindPipeline(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, debugMat.pipeline);
+
+					////camera data descriptor
+					vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, debugMat.pipelineLayout, 0, 1, &currentFrame->globalDescriptor, 1, &uniform_offset);
+
+					//object data descriptor
+					//vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, debugMat.pipelineLayout, 1, 1, &currentFrame->objectDescriptor, 0, nullptr);
+
+					//vkCmdBindDescriptorSets(callCmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, debugMat->pipelineLayout, 2, 1, &mesh[start]._material->albedo->textureSet, 0, nullptr);
+
+					//bind the mesh vertex buffer with offset 0
+					const auto& debugMeshData = _meshes["debug"];
+					VkDeviceSize offset = 0;
+					vkCmdBindVertexBuffers(callCmdBuf, 0, 1, &debugMeshData._vertexBuffer._buffer, &offset);
+
+					for(const auto& it : iter)
+					{
+						glm::mat4 model = transform[it].getModelMatrix();
+
+						std::array<DebugPushConstants, 6> lines;
+						const auto& mi = collBox->min;
+						const auto& ma = collBox->max;
+
+						std::vector<std::pair<glm::vec3, glm::vec3>> pairs = {
+							{mi, glm::vec3{-mi.x, mi.y, mi.z}},
+							{mi, glm::vec3{mi.x, -mi.y, mi.z}},
+							{mi, glm::vec3{mi.x, mi.y, -mi.z}},
+							{ma, glm::vec3{ma.x, ma.y, -ma.z}},
+							{ma, glm::vec3{-ma.x, ma.y, ma.z}},
+							{ma, glm::vec3{ma.x, -ma.y, ma.z}}
+						};
+
+						for(int i = 0; i < pairs.size(); ++i)
+						{
+							auto& line = lines[i];
+
+							line.color = glm::vec4{ 1.0, 0.0, 0.0, 0.0 };
+							line.render_matrix = model;
+							line.points[0] = glm::vec4{ pairs[i].first, 1.0 };
+							line.points[1] = glm::vec4{ pairs[i].second, 1.0 };
+						}
+
+						for(auto& line : lines)
+						{
+							//upload the mesh to the GPU via pushconstants
+							vkCmdPushConstants(callCmdBuf, debugMat.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(DebugPushConstants), &line);
+							//we can now draw
+							vkCmdDraw(callCmdBuf, 2, 1, 0, 0);
 						}
 					}
-				}
-		});
-	}).name("render task");
+				});
+		}).name("DebugRender");
 
-	if(executor.num_topologies() != 0)
+	if(Taskmaster::Get()->executor.num_topologies() != 0)
 	{
-		executor.wait_for_all();
+		Taskmaster::Get()->executor.wait_for_all();
 	}
-	executor.run(std::move(prepareRender));
-	executor.wait_for_all();
+	Taskmaster::Get()->executor.run(std::move(prepareRender));
+	Taskmaster::Get()->executor.wait_for_all();
 
+	world.staging_end();
 
 	for(int i = 0; i < get_current_frame().commandBuffers.size(); i++)
 	{
@@ -1512,11 +1648,10 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 
 		VK_CHECK(vkEndCommandBuffer(callCmdBuf));
 	}
-
 	vkCmdExecuteCommands(cmd, get_current_frame().commandBuffers.size(), get_current_frame().commandBuffers.data());
 }
 
-void VulkanEngine::init_scene(flecs::world& world)
+void VulkanEngine::init_scene()
 {
 	ZoneScoped;
 
@@ -1528,33 +1663,53 @@ void VulkanEngine::init_scene(flecs::world& world)
 	//empire_ent.set<MeshComponent>({get_mesh("empire"), get_material("texturedmesh")});
 	//empire_ent.set<Transform>({ glm::translate(glm::vec3{ 5,-10,0 }) });
 
-	for (int x = -10; x <= 10; x++) {
-		for (int y = -10; y <= 0; y++) {
+	/*RenderObject tri = {};
+	tri.mesh = get_mesh("cube");
+	tri.material = get_material("green_voxel");
+	glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(0, -1.0f, 0));
+	glm::mat4 scale = glm::scale(glm::mat4{ 1.0 }, glm::vec3(0.5, 0.5, 0.5));
+	auto trans = translation * scale;
+
+	std::string str = "voxel";
+	auto ent = world.entity(str.c_str());
+	ent.set<MeshComponent>({ tri.mesh, tri.material });
+	ent.add<HAS_MATERIAL>(tri.material->materialEntity);
+
+	ent.set<Transform>({ glm::vec3(0, -1.0f, 0), glm::quat(1.0, 0.0, 0.0, 0.0), glm::vec3(0.25, 0.25, 0.25) });
+	ent.set<BoxCollisionComponent>({});*/
+
+	for (int x = -5; x <= 15; x++) {
+		for (int y = -1; y <= 0; y++) {
 			RenderObject tri = {};
 			tri.mesh = get_mesh("cube");
 			tri.material = get_material("green_voxel");
-			glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(x, -1.0f, y));
+			glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(x * 2, -1.0f, y * 2));
 			glm::mat4 scale = glm::scale(glm::mat4{ 1.0 }, glm::vec3(0.5, 0.5, 0.5));
 			auto trans = translation * scale;
 
 			auto str = "voxel_" + std::to_string(x) + "_" + std::to_string(y);
 			auto ent = world.entity(str.c_str());
 			ent.set<MeshComponent>({tri.mesh, tri.material});
-			ent.set<Transform>({ glm::vec3(x, -1.0f, y), glm::quat(1.0, 0.0, 0.0, 0.0), glm::vec3(0.5, 0.5, 0.5) });
+			ent.add<HAS_MATERIAL>(tri.material->materialEntity);
+
+			ent.set<Transform>({ glm::vec3(x * 3, -2.0f, y * 3), glm::quat(1.0, 0.0, 0.0, 0.0), glm::vec3(0.25, 0.25, 0.25) });
+			ent.set<BoxCollisionComponent>({});
 		}
-		for(int y = 1; y <= 10; y++)
+		for(int y = 1; y <= 2; y++)
 		{
 			RenderObject tri = {};
 			tri.mesh = get_mesh("cube");
 			tri.material = get_material("black_voxel");
-			glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(x, -1.0f, y));
+			glm::mat4 translation = glm::translate(glm::mat4{ 1.0 }, glm::vec3(x * 2, -1.0f, y * 2));
 			glm::mat4 scale = glm::scale(glm::mat4{ 1.0 }, glm::vec3(0.5, 0.5, 0.5));
 			auto trans = translation * scale;
 
 			auto str = "voxel_" + std::to_string(x) + "_" + std::to_string(y);
 			auto ent = world.entity(str.c_str());
 			ent.set<MeshComponent>({ tri.mesh, tri.material });
-			ent.set<Transform>({ glm::vec3(x, -1.0f, y), glm::quat(1.0, 0.0, 0.0, 0.0), glm::vec3(0.5, 0.5, 0.5) });
+			ent.add<HAS_MATERIAL>(tri.material->materialEntity);
+
+			ent.set<Transform>({ glm::vec3(x * 3, -1.0f, y * 3), glm::quat(1.0, 0.0, 0.0, 0.0), glm::vec3(0.25, 0.25, 0.25) });
 		}
 	}
 }
@@ -1763,6 +1918,7 @@ size_t VulkanEngine::pad_uniform_buffer_size(size_t originalSize)
 
 void VulkanEngine::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function)
 {
+	std::lock_guard lock(submitMutex);
 	ZoneScoped;
 	//allocate the default command buffer that we will use for the instant commands
 	VkCommandBufferAllocateInfo cmdAllocInfo = vkinit::command_buffer_allocate_info(_uploadContext._commandPool, 1);
@@ -1781,7 +1937,6 @@ void VulkanEngine::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& f
 	VK_CHECK(vkEndCommandBuffer(cmd));
 
 	VkSubmitInfo submit = vkinit::submit_info(&cmd);
-
 
 	//submit command buffer to the queue and execute it.
 	// _uploadFence will now block until the graphic commands finish execution
