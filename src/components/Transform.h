@@ -27,6 +27,9 @@ struct Vector3 {
 	static void bind_methods(wrenpp::VM& vm);
 };
 
+struct Local {};
+struct Global {};
+
 struct Transform{
 	glm::vec3 globalPosition;
 	glm::quat globalRotation;
@@ -36,23 +39,27 @@ struct Transform{
 	glm::quat rotation;
 	glm::vec3 scale;
 
-	Transform(glm::vec3 position = glm::vec3{},
+	explicit Transform(glm::vec3 position = glm::vec3{},
 		glm::quat rotation = glm::quat(1.0, 0.0, 0.0, 0.0),
 		glm::vec3 scale = glm::vec3{ 1 });
 
+    [[nodiscard]]
 	glm::mat4 getModelMatrix() const
 	{
 		return transform;
 	}
 
+    [[nodiscard]]
 	glm::vec3 forward() const
 	{
 		return transform[0];
 	}
+    [[nodiscard]]
 	glm::vec3 right() const
 	{
 		return transform[1];
 	}
+    [[nodiscard]]
 	glm::vec3 up() const
 	{
 		return transform[2];

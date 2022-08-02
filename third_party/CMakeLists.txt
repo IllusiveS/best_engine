@@ -33,6 +33,8 @@ target_include_directories(imgui PRIVATE ${Vulkan_INCLUDE_DIRS})
 target_include_directories(imgui PRIVATE ${SDL2_INCLUDE_DIR})
 target_include_directories(imgui PRIVATE ${PROJECT_SOURCE_DIR}/third_party/imgui)
 
+add_subdirectory(glslang)
+add_subdirectory(SPIRV-Tools)
 add_subdirectory(shaderc)
 
 #IMGUI GIZMO

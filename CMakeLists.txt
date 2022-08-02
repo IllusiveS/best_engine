@@ -12,9 +12,8 @@ target_compile_definitions(best_engine PRIVATE TRACY_ENABLE)
 find_package(Vulkan REQUIRED)
 
 #SDL2.0
-set(SDL2_DIR "P:/zig/sdl2.0")
+set(SDL2_DIR "${PROJECT_SOURCE_DIR}/libs/sdl")
 set(SDL2_INCLUDE_DIR "${SDL2_DIR}/include")
-
 # Support both 32 and 64 bit builds
 if (${CMAKE_SIZEOF_VOID_P} MATCHES 8)
     set(SDL2_LIBRARIES "${SDL2_DIR}/lib/x64/SDL2.lib;${SDL2_DIR}/lib/x64/SDL2main.lib")
@@ -24,6 +23,9 @@ endif ()
 
 string(STRIP "${SDL2_LIBRARIES}" SDL2_LIBRARIES)
 
+target_include_directories(best_engine PUBLIC sdl/include)
+
+add_subdirectory(libs)
 add_subdirectory(third_party)
 
 include_directories(src/)

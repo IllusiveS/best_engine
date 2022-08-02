@@ -178,7 +178,7 @@ void VulkanEngine::init()
 	//everything went fine
 	_isInitialized = true;
 
-	world.set_stages(Taskmaster::Get()->worldThreads);
+	world.set_stage_count(Taskmaster::Get()->worldThreads);
 }
 
 void VulkanEngine::init_tracy()
@@ -1199,9 +1199,12 @@ void VulkanEngine::system_update_global_transforms(flecs::world& world)
 {
 	ZoneScopedN("update transforms");
 
+    //TODO implement single function for change of local and therefore global position
+    //TODO Implement same transform for local and global
 	auto query = world.query_builder<Transform, const Transform>()
 		.arg(2)
-			.set(flecs::Parent | flecs::Cascade)
+			.parent()
+            .cascade()
 			.oper(flecs::Optional)
 		.build();
 
@@ -1481,7 +1484,7 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 		return (&p1->_material > &p2->_material) ? 1 : -1;
 	};
 
-	world.staging_begin();
+	world.readonly_begin();
 
 	static auto collision_box_debug_render_query = world.query_builder< const Transform, const BoxCollisionComponent>()
 		.build();
@@ -1640,7 +1643,7 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first, int co
 	Taskmaster::Get()->executor.run(std::move(prepareRender));
 	Taskmaster::Get()->executor.wait_for_all();
 
-	world.staging_end();
+	world.readonly_end();
 
 	for(int i = 0; i < get_current_frame().commandBuffers.size(); i++)
 	{

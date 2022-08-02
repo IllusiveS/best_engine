@@ -82,3 +82,5 @@ bin/
 
 *.spv
 
+libs/*
+
